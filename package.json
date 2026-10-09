@@ -1,0 +1,15 @@
+{
+  "name": "sap-code-reviewer",
+  "version": "1.0.0",
+  "description": "Claude Code project for automated review of SAP applications (SAPUI5, CAP, RAP, ABAP Cloud)",
+  "private": true,
+  "scripts": {
+    "export": "node scripts/export-excel.js",
+    "serve": "node scripts/server.js",
+    "start": "node scripts/server.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.15.2"
+  }
+}

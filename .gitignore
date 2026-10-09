@@ -1,0 +1,10 @@
+node_modules/
+uploads/*/
+!uploads/.gitkeep
+reports/*.json
+reports/*.xlsx
+.claude/settings.local.json
+.claude/local/
+.claude/todos/
+Thumbs.db
+.DS_Store

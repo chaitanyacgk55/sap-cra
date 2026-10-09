@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy this file to mask.config.json (repo root) or .reviewer-config.json (repo root or uploads/<project>/) to enable client-name masking during report generation. Aliases are matched case-insensitively as whole words. Runtime overrides: MASK_CLIENT env var, or `--client \"A,B\"` CLI arg on the export scripts.",
+  "clientAliases": [
+    "Vistra",
+    "VISTRA HOLDINGS",
+    "Vistra Holdings UK",
+    "Vistra Holdings (UK) Limited"
+  ],
+  "clientMask": "[CLIENT]",
+  "maskEmails": true,
+  "maskIPs": true,
+  "maskTokens": true,
+  "additionalPatterns": [
+    { "pattern": "\\bACC-\\d{4,}\\b", "flags": "g", "replacement": "[ACCOUNT-ID]" }
+  ]
+}

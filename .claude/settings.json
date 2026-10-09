@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "CLAUDE_PROJECT_NAME": "SAP-Code-Reviewer"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Read(**)",
+      "Edit(reports/**)",
+      "Edit(scripts/**)",
+      "Bash(node scripts/*)",
+      "Bash(ls *)",
+      "Bash(dir *)"
+    ]
+  }
+}

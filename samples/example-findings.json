@@ -1,0 +1,88 @@
+{
+  "project": "example-project",
+  "reviewedAt": "2026-09-04T10:00:00Z",
+  "technologies": ["SAPUI5", "CAP"],
+  "findings": [
+    {
+      "id": 1,
+      "severity": "High",
+      "technology": "CAP",
+      "layer": "srv",
+      "category": "security",
+      "file": "srv/catalog-service.js",
+      "line": 24,
+      "title": "Unsafe dynamic query construction",
+      "issue": "The handler builds a CQN query using string concatenation with user input, bypassing parameter binding and allowing malformed input to alter the query.",
+      "recommendation": "Use parameterized CQN: const rows = await SELECT.from(Books).where({ ID: req.data.ID });",
+      "codeSnippet": "const rows = await cds.run(`SELECT * FROM Books WHERE ID = '${req.data.ID}'`);",
+      "referenceLink": "https://cap.cloud.sap/docs/node.js/cds-ql",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 2,
+      "severity": "High",
+      "technology": "CAP",
+      "layer": "security",
+      "category": "security",
+      "file": "srv/admin-service.cds",
+      "line": 3,
+      "title": "Service exposed without authorization",
+      "issue": "AdminService has no @requires or @restrict annotation. It is reachable by any authenticated user, and possibly by anonymous callers depending on approuter config.",
+      "recommendation": "Add @(requires: 'Admin') at the service level and @restrict per entity as needed.",
+      "codeSnippet": "service AdminService {\n  entity Books as projection on my.Books;\n}",
+      "referenceLink": "https://cap.cloud.sap/docs/guides/security/authorization",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 3,
+      "severity": "Medium",
+      "technology": "SAPUI5",
+      "layer": "app",
+      "category": "performance",
+      "file": "webapp/controller/List.controller.js",
+      "line": 42,
+      "title": "Unbounded OData read",
+      "issue": "The list binding reads all rows without $top; on large tables this loads the whole dataset into the client.",
+      "recommendation": "Add growingThreshold on sap.m.Table or set $top on the binding parameters.",
+      "codeSnippet": "this.getView().byId('itemsTable').bindItems({ path: '/Books', template: oTemplate });",
+      "referenceLink": "https://sapui5.hana.ondemand.com/#/topic/f89dda5a4d97495aa1f5cbcbcdd68b06",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 4,
+      "severity": "Medium",
+      "technology": "SAPUI5",
+      "layer": "app",
+      "category": "clean-core",
+      "file": "webapp/controller/Detail.controller.js",
+      "line": 18,
+      "title": "Deprecated jQuery.sap.log usage",
+      "issue": "jQuery.sap.log is deprecated since UI5 1.58; using it prevents future upgrade and warns in newer runtimes.",
+      "recommendation": "Replace with sap/base/Log:\n  sap.ui.define(['sap/base/Log'], function(Log) { Log.info('...'); });",
+      "codeSnippet": "jQuery.sap.log.info('Detail opened');",
+      "referenceLink": "https://sapui5.hana.ondemand.com/#/api/module:sap/base/Log",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 5,
+      "severity": "Low",
+      "technology": "SAPUI5",
+      "layer": "app",
+      "category": "testability",
+      "file": "webapp/",
+      "line": 0,
+      "title": "No unit or OPA tests found",
+      "issue": "The project contains no test/ folder or *.qunit.html; regressions cannot be caught automatically.",
+      "recommendation": "Add QUnit tests for controllers and OPA5 journeys for critical user flows.",
+      "referenceLink": "https://sapui5.hana.ondemand.com/#/topic/9d0aacf5f56d4b25b31da9dd7fdf2fed",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "summary": {
+    "high": 2,
+    "medium": 2,
+    "low": 1,
+    "total": 5,
+    "assessment": "Blockers present — resolve authorization + injection issues before merge"
+  }
+}

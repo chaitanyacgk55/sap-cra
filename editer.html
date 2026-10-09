@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP Code Reviewer — Upload</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 { font-size: 28px; color: #a78bfa; font-weight: 700; display: inline-flex; align-items: center; gap: 12px; }
+  .header p { color: #6b7280; margin-top: 8px; font-size: 14px; }
+  .tech-chips { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  .tech-chip { background: #1a1d27; border: 1px solid #2d3148; border-radius: 20px; padding: 4px 12px; font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
+  .tech-chip i { color: #a78bfa; font-size: 13px; }
+
+  .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px; padding: 22px; margin-bottom: 18px; }
+  .card h3 { font-size: 15px; color: #e2e8f0; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .card h3 .num { background: #6d28d9; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field label { font-size: 12px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .field input { background: #0f1117; border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0; padding: 9px 12px; font-size: 14px; outline: none; }
+  .field input:focus { border-color: #6d28d9; }
+  .field small { color: #6b7280; font-size: 12px; }
+
+  .upload-zone { border: 2px dashed #2d3148; border-radius: 10px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.15s; background: #0f1117; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: #6d28d9; background: #1e1535; }
+  .upload-zone i { font-size: 40px; color: #6d28d9; display: block; margin-bottom: 10px; }
+  .upload-zone p { color: #cbd5e1; font-size: 14px; margin-bottom: 4px; }
+  .upload-zone strong { color: #a78bfa; }
+  .upload-zone small { color: #6b7280; font-size: 12px; }
+  #fileInput, #fileInputDir { display: none; }
+
+  .btn-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .btn { padding: 9px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #2d3148; background: transparent; color: #cbd5e1; display: inline-flex; align-items: center; gap: 8px; transition: all 0.15s; font-weight: 500; }
+  .btn:hover { background: #20243a; border-color: #6d28d9; color: #a78bfa; }
+  .btn.primary { background: #6d28d9; border-color: #6d28d9; color: #fff; }
+  .btn.primary:hover { background: #5b21b6; }
+  .btn.primary:disabled { background: #374151; border-color: #374151; cursor: not-allowed; }
+
+  .file-list { max-height: 240px; overflow-y: auto; margin-top: 12px; }
+  .file-list::-webkit-scrollbar { width: 5px; }
+  .file-list::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 3px; }
+  .file-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 5px; font-size: 12px; }
+  .file-row:hover { background: #20243a; }
+  .file-row i { font-size: 14px; }
+  .file-row .path { flex: 1; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-row .size { color: #6b7280; font-size: 11px; }
+
+  .status-box { padding: 12px 16px; border-radius: 6px; margin-top: 14px; font-size: 13px; display: none; }
+  .status-box.show { display: block; }
+  .status-box.info { background: #172d45; border: 1px solid #1e40af; color: #93c5fd; }
+  .status-box.success { background: #14352b; border: 1px solid #16a34a; color: #86efac; }
+  .status-box.error { background: #3f1d2b; border: 1px solid #dc2626; color: #fda4af; }
+  .status-box.warn { background: #3d2e12; border: 1px solid #ca8a04; color: #fde68a; }
+
+  .code-block { background: #0f1117; border: 1px solid #2d3148; border-radius: 6px; padding: 10px 14px; font-family: 'Cascadia Code','Consolas',monospace; font-size: 13px; color: #86efac; margin-top: 8px; overflow-x: auto; }
+  .code-block code { color: inherit; }
+  .code-block .comment { color: #6b7280; }
+
+  .progress-wrap { margin-top: 14px; display: none; }
+  .progress-wrap.show { display: block; }
+  .progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; color: #cbd5e1; }
+  .progress-head .stage { font-weight: 600; color: #a78bfa; }
+  .progress-head .elapsed { color: #9ca3af; font-family: 'Cascadia Code','Consolas',monospace; }
+  .progress-bar { position: relative; height: 6px; background: #0f1117; border: 1px solid #2d3148; border-radius: 999px; overflow: hidden; }
+  .progress-bar::before { content: ''; position: absolute; inset: 0; width: 30%; border-radius: 999px; background: linear-gradient(90deg, #6d28d9, #a78bfa, #6d28d9); animation: pb-slide 1.6s linear infinite; }
+  @keyframes pb-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+  .progress-note { font-size: 11px; color: #6b7280; margin-top: 6px; }
+
+  .findings-summary { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .fcard { padding: 16px 18px; background: #0f1117; border: 1px solid #2d3148; border-radius: 10px; position: relative; overflow: hidden; }
+  .fcard .label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; margin-bottom: 8px; }
+  .fcard .count { font-size: 32px; font-weight: 700; line-height: 1; color: #e2e8f0; }
+  .fcard .sub { font-size: 11px; color: #6b7280; margin-top: 6px; }
+  .fcard.high   { border-color: #7f1d1d; background: linear-gradient(180deg,#1a0f14 0%,#0f1117 100%); }
+  .fcard.high   .label, .fcard.high   .count { color: #fb7185; }
+  .fcard.medium { border-color: #92400e; background: linear-gradient(180deg,#1a1408 0%,#0f1117 100%); }
+  .fcard.medium .label, .fcard.medium .count { color: #fbbf24; }
+  .fcard.low    { border-color: #1e40af; background: linear-gradient(180deg,#0b1225 0%,#0f1117 100%); }
+  .fcard.low    .label, .fcard.low    .count { color: #60a5fa; }
+  .fcard.total  { border-color: #6d28d9; background: linear-gradient(180deg,#160b28 0%,#0f1117 100%); }
+  .fcard.total  .label, .fcard.total  .count { color: #c4b5fd; }
+  .findings-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .findings-header h3 { font-size: 14px; color: #e2e8f0; font-weight: 700; }
+  .findings-header .assessment { font-size: 12px; color: #9ca3af; }
+
+  /* ── Health-status graphs ─────────────────────────────────────────────── */
+  .health-grid { display: grid; grid-template-columns: 260px 1fr; gap: 22px; margin-top: 22px; align-items: stretch; }
+  @media (max-width: 720px) { .health-grid { grid-template-columns: 1fr; } }
+  .gauge-card { background: #0f1117; border: 1px solid #2d3148; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .gauge-card .gauge-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #9ca3af; font-weight: 700; margin-bottom: 6px; }
+  .gauge-card .gauge-verdict { margin-top: 10px; font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
+  .gauge-svg { position: relative; width: 200px; height: 130px; }
+  .gauge-score { position: absolute; top: 55%; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 700; color: #e2e8f0; }
+  .gauge-score span { font-size: 14px; color: #9ca3af; font-weight: 500; }
+
+  .dims-card { background: #0f1117; border: 1px solid #2d3148; border-radius: 12px; padding: 18px; }
+  .dims-card h4 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; font-weight: 700; margin-bottom: 14px; }
+  .dim-row { margin-bottom: 12px; }
+  .dim-row:last-child { margin-bottom: 0; }
+  .dim-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; font-size: 12px; }
+  .dim-head .name { color: #cbd5e1; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+  .dim-head .name i { font-size: 14px; }
+  .dim-head .val { font-family: 'Cascadia Code','Consolas',monospace; color: #e2e8f0; font-weight: 700; }
+  .dim-track { height: 8px; background: #1a1d27; border-radius: 999px; overflow: hidden; position: relative; }
+  .dim-fill { height: 100%; border-radius: 999px; transition: width 0.6s cubic-bezier(0.22, 0.61, 0.36, 1); }
+  .dim-note { font-size: 11px; color: #6b7280; margin-top: 4px; line-height: 1.5; }
+  .dim-note strong, .dim-note code { color: #a78bfa; font-family: 'Cascadia Code','Consolas',monospace; }
+
+  .dist-card { background: #0f1117; border: 1px solid #2d3148; border-radius: 12px; padding: 18px; margin-top: 18px; }
+  .dist-card h4 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; font-weight: 700; margin-bottom: 12px; }
+  .dist-bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; background: #1a1d27; }
+  .dist-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #0f1117; transition: flex 0.6s cubic-bezier(0.22, 0.61, 0.36, 1); min-width: 0; }
+  .dist-seg.high   { background: #fb7185; }
+  .dist-seg.medium { background: #fbbf24; }
+  .dist-seg.low    { background: #60a5fa; }
+  .dist-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: #9ca3af; flex-wrap: wrap; }
+  .dist-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .dist-legend .dot.high   { background: #fb7185; }
+  .dist-legend .dot.medium { background: #fbbf24; }
+  .dist-legend .dot.low    { background: #60a5fa; }
+
+  .verdict-excellent { background: #14352b; color: #86efac; border: 1px solid #16a34a; }
+  .verdict-good      { background: #172d45; color: #93c5fd; border: 1px solid #1e40af; }
+  .verdict-fair      { background: #3d2e12; color: #fde68a; border: 1px solid #ca8a04; }
+  .verdict-poor      { background: #3f1d2b; color: #fda4af; border: 1px solid #dc2626; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1><i class="ti ti-shield-code"></i> SAP Code Reviewer</h1>
+    <p>Upload a SAP project. The Claude Code agent will identify the technology and run a best-practice review.</p>
+    <div class="tech-chips">
+      <div class="tech-chip"><i class="ti ti-brand-javascript"></i> SAPUI5 / Fiori</div>
+      <div class="tech-chip"><i class="ti ti-file-code"></i> CAP (CAPM)</div>
+      <div class="tech-chip"><i class="ti ti-server"></i> RAP</div>
+      <div class="tech-chip"><i class="ti ti-cloud"></i> ABAP Cloud</div>
+    </div>
+  </div>
+
+  <!-- Card 1 : Metadata -->
+  <div class="card">
+    <h3><span class="num">1</span> Project details</h3>
+    <div class="field">
+      <label for="projName">Project name</label>
+      <input type="text" id="projName" placeholder="my-sap-app">
+      <small>Files will be saved to <code>uploads/&lt;project-name&gt;/</code>. Spaces become hyphens.</small>
+    </div>
+    <div class="field">
+      <label for="clientName">Client / customer name to mask <span style="color:#6b7280;text-transform:none;letter-spacing:0">(optional)</span></label>
+      <input type="text" id="clientName" placeholder="e.g. Vistra, Vistra Holdings, ACME Corp">
+      <small>Comma-separated aliases. All occurrences are redacted as <code>[CLIENT]</code> in the PDF &amp; Excel reports (case-insensitive, whole-word). Emails, IPs and JWT tokens are always masked.</small>
+    </div>
+  </div>
+
+  <!-- Card 2 : Upload (streams straight into uploads/ via the local server) -->
+  <div class="card">
+    <h3><span class="num">2</span> Add files</h3>
+    <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInputDir').click()">
+      <i class="ti ti-folder-up"></i>
+      <p><strong>Click to pick a project folder</strong>, or drop a folder / ZIP / TAR here</p>
+      <small>Supported: folders, .zip, .tar, .tar.gz, .tgz — the whole tree is uploaded (webapp/, srv/, db/, abap/...).</small>
+    </div>
+    <input type="file" id="fileInput" multiple>
+    <input type="file" id="fileInputDir" multiple webkitdirectory>
+    <input type="file" id="fileInputArchive" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/x-tar,application/gzip">
+    <div class="btn-row">
+      <button class="btn" onclick="document.getElementById('fileInputArchive').click()">
+        <i class="ti ti-file-zip"></i> Pick ZIP / TAR
+      </button>
+      <button class="btn" onclick="document.getElementById('fileInput').click()">
+        <i class="ti ti-file-plus"></i> Pick individual files
+      </button>
+      <button class="btn" onclick="clearFiles()">
+        <i class="ti ti-trash"></i> Clear
+      </button>
+      <button class="btn" onclick="downloadZip()" id="zipBtn" disabled>
+        <i class="ti ti-download"></i> Download ZIP
+      </button>
+    </div>
+    <div class="file-list" id="fileList"></div>
+    <div class="status-box" id="statusBox"></div>
+  </div>
+
+  <!-- Card 3 : Review -->
+  <div class="card">
+    <h3><span class="num">3</span> Run the review</h3>
+    <p style="color:#9ca3af;font-size:13px;margin-bottom:14px">
+      Click <strong>Review</strong> to trigger <code>/sap-code-reviewer</code> on the local server. The server runs the
+      Claude agent, writes findings JSON, and generates the Excel report — all in one step.
+    </p>
+    <div class="btn-row" style="align-items:center">
+      <button class="btn primary" id="reviewBtn" onclick="startReview()" disabled>
+        <i class="ti ti-player-play"></i> Review
+      </button>
+      <a class="btn" id="downloadPdfBtn" href="#" style="display:none">
+        <i class="ti ti-file-type-pdf"></i> Download PDF
+      </a>
+      <a class="btn" id="downloadXlsxBtn" href="#" style="display:none">
+        <i class="ti ti-file-spreadsheet"></i> Download Excel
+      </a>
+    </div>
+    <p style="font-size:11px;color:#6b7280;margin-top:8px;line-height:1.5">
+      <i class="ti ti-lock"></i> <strong style="color:#a78bfa">Deterministic caching</strong>:
+      results are pinned to the exact contents of your upload &amp; the agent instructions.
+      Re-clicking Review on an unchanged upload returns the identical findings.
+      Change any source file (or update the agent) to trigger a fresh review.
+    </p>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-head">
+        <span class="stage" id="progressStage">Preparing review</span>
+        <span class="elapsed" id="progressElapsed">00:00</span>
+      </div>
+      <div class="progress-bar"></div>
+      <div class="progress-note" id="progressNote">The Claude agent is scanning files. Larger projects can take several minutes — this is normal.</div>
+    </div>
+    <div class="status-box" id="reviewStatus"></div>
+
+    <div id="findingsSummary" style="margin-top:20px; display:none">
+      <div class="findings-header">
+        <h3><i class="ti ti-chart-bar"></i> Findings by Priority</h3>
+        <span class="assessment" id="findingsAssessment"></span>
+      </div>
+      <div class="findings-summary">
+        <div class="fcard total">
+          <div class="label">Total</div>
+          <div class="count" id="countTotal">0</div>
+          <div class="sub" id="countTechs">—</div>
+        </div>
+        <div class="fcard high">
+          <div class="label">High</div>
+          <div class="count" id="countHigh">0</div>
+          <div class="sub">Blockers / must fix</div>
+        </div>
+        <div class="fcard medium">
+          <div class="label">Medium</div>
+          <div class="count" id="countMedium">0</div>
+          <div class="sub">Should fix before release</div>
+        </div>
+        <div class="fcard low">
+          <div class="label">Low</div>
+          <div class="count" id="countLow">0</div>
+          <div class="sub">Informational / cleanup</div>
+        </div>
+      </div>
+
+      <!-- Health status: gauge + dimension bars -->
+      <div class="health-grid">
+        <div class="gauge-card">
+          <div class="gauge-label">Code Health Score</div>
+          <div class="gauge-svg">
+            <svg viewBox="0 0 200 130" width="200" height="130">
+              <defs>
+                <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%"   stop-color="#fb7185"/>
+                  <stop offset="50%"  stop-color="#fbbf24"/>
+                  <stop offset="100%" stop-color="#22c55e"/>
+                </linearGradient>
+              </defs>
+              <!-- Track -->
+              <path d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="#1a1d27" stroke-width="16" stroke-linecap="round"/>
+              <!-- Score arc -->
+              <path id="gaugeArc" d="M 20 110 A 80 80 0 0 1 180 110" fill="none" stroke="url(#gaugeGrad)" stroke-width="16" stroke-linecap="round"
+                    stroke-dasharray="251.2" stroke-dashoffset="251.2" style="transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);"/>
+              <!-- Needle -->
+              <g id="gaugeNeedle" transform="rotate(-90 100 110)" style="transition: transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: 100px 110px;">
+                <line x1="100" y1="110" x2="100" y2="40" stroke="#e2e8f0" stroke-width="2.2" stroke-linecap="round"/>
+                <circle cx="100" cy="110" r="5" fill="#a78bfa"/>
+              </g>
+            </svg>
+            <div class="gauge-score"><span id="gaugeValue">0</span><span> / 100</span></div>
+          </div>
+          <div class="gauge-verdict verdict-good" id="gaugeVerdict">—</div>
+          <div id="gaugeFormula" style="margin-top:8px; font-size:11px; color:#6b7280; text-align:center; line-height:1.5"></div>
+        </div>
+
+        <div class="dims-card">
+          <h4>Health Dimensions</h4>
+          <div class="dim-row" data-dim="security">
+            <div class="dim-head">
+              <span class="name"><i class="ti ti-shield-lock"></i> Security / Vulnerability</span>
+              <span class="val"><span class="dimScore">100</span> / 100</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" style="width:0%; background:#22c55e"></div></div>
+            <div class="dim-note dimNote">No security issues detected.</div>
+          </div>
+          <div class="dim-row" data-dim="scalability">
+            <div class="dim-head">
+              <span class="name"><i class="ti ti-chart-line"></i> Scalability / Performance</span>
+              <span class="val"><span class="dimScore">100</span> / 100</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" style="width:0%; background:#22c55e"></div></div>
+            <div class="dim-note dimNote">No performance issues detected.</div>
+          </div>
+          <div class="dim-row" data-dim="maintainability">
+            <div class="dim-head">
+              <span class="name"><i class="ti ti-tools"></i> Maintainability</span>
+              <span class="val"><span class="dimScore">100</span> / 100</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" style="width:0%; background:#22c55e"></div></div>
+            <div class="dim-note dimNote">Code is clean.</div>
+          </div>
+          <div class="dim-row" data-dim="compliance">
+            <div class="dim-head">
+              <span class="name"><i class="ti ti-certificate"></i> Compliance / Clean Core</span>
+              <span class="val"><span class="dimScore">100</span> / 100</span>
+            </div>
+            <div class="dim-track"><div class="dim-fill" style="width:0%; background:#22c55e"></div></div>
+            <div class="dim-note dimNote">No compliance issues detected.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Distribution bar -->
+      <div class="dist-card">
+        <h4>Severity Distribution</h4>
+        <div class="dist-bar">
+          <div class="dist-seg high"   id="distHigh"   style="flex:0 0 0%"></div>
+          <div class="dist-seg medium" id="distMedium" style="flex:0 0 0%"></div>
+          <div class="dist-seg low"    id="distLow"    style="flex:0 0 0%"></div>
+        </div>
+        <div class="dist-legend">
+          <span><span class="dot high"></span>High <span id="legendHigh">0</span></span>
+          <span><span class="dot medium"></span>Medium <span id="legendMedium">0</span></span>
+          <span><span class="dot low"></span>Low <span id="legendLow">0</span></span>
+          <span id="legendBlocks" style="margin-left:auto;color:#fb7185;font-weight:600;display:none"><i class="ti ti-alert-triangle"></i> <span id="blocksCount">0</span> transport blocker(s)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"
+  onerror="window._pakoLoadErr=true"></script>
+<script>
+// Dynamically load JSZip trying multiple CDN sources so corporate-proxy
+// environments that block one CDN still get ZIP support.
+(function loadJSZip() {
+  const srcs = [
+    'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+    'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+    'https://unpkg.com/jszip@3.10.1/dist/jszip.min.js',
+  ];
+  let idx = 0;
+  function tryNext() {
+    if (idx >= srcs.length) {
+      window._jszipLoadFailed = true;
+      console.warn('[SAP Reviewer] JSZip could not be loaded from any CDN. ZIP upload will show a helpful error.');
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = srcs[idx++];
+    s.onerror = tryNext;
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
+<script>
+const files = new Map();
+let skippedCount = 0;
+
+// Non-SAP files/folders that must never be sent to the reviewer.
+// Mirrors the ignore rules in .claude/agents/sap-code-reviewer.md.
+const SKIP_DIR_RE = /(^|\/)(\.git|\.vscode|\.idea|\.settings|\.metadata|node_modules|dist|build|out|\.build|coverage|\.nyc_output|\.vs|bin|obj|test-results|reports|screenshots|\.hana-cli|mta_archives|gen)(\/|$)/i;
+const SKIP_FILE_RE = /^(\.gitignore|\.gitattributes|\.gitkeep|\.appgeninfo\.json|appgeninfo\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|\.ds_store|thumbs\.db|launch\.json|tasks\.json|\.eslintrc.*|\.prettierrc.*|\.editorconfig|\.stylelintrc.*|\.babelrc.*|\.npmrc|\.nvmrc|\.node-version|readme.*|changelog.*|license.*|contributing.*)$/i;
+const SKIP_EXT_RE = /\.(log|tmp|bak|swp|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|pdf|jar|class|exe|dll|so|dylib)$/i;
+
+function shouldSkip(relPath) {
+  const rel = relPath.replace(/\\/g, '/');
+  if (SKIP_DIR_RE.test(rel)) return true;
+  const base = rel.split('/').pop() || '';
+  if (SKIP_FILE_RE.test(base)) return true;
+  if (SKIP_EXT_RE.test(base)) return true;
+  return false;
+}
+
+// Timestamped default so users who forget to rename don't collide.
+function timestampSlug() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// ─── UI wiring ─────────────────────────────────────────────────────────────
+const projName = document.getElementById('projName');
+projName.value = 'sap-app-' + timestampSlug();
+// Track which project the current upload targets; if the user changes the
+// name we must reset again for the new target folder.
+let resetForProject = null;
+function refreshCmdName() {
+  const clean = projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '');
+  const c1 = document.getElementById('cmdName');
+  const c2 = document.getElementById('cmdName2');
+  if (c1) c1.textContent = clean || 'sap-app';
+  if (c2) c2.textContent = clean || 'sap-app';
+}
+refreshCmdName();
+
+projName.addEventListener('input', () => {
+  refreshCmdName();
+  // Project changed → tracking is stale. Files remain in the picker so
+  // the next autoUpload will push them under the new project name.
+  uploaded.clear();
+  resetForProject = null; // force a fresh /api/reset for the new target
+});
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  addFileList([...e.target.files], false); e.target.value = '';
+});
+document.getElementById('fileInputDir').addEventListener('change', e => {
+  addFileList([...e.target.files], true); e.target.value = '';
+});
+document.getElementById('fileInputArchive').addEventListener('change', async e => {
+  for (const f of [...e.target.files]) {
+    if (isArchive(f.name)) await addArchive(f);
+    else files.set(f.name, f);
+  }
+  e.target.value = '';
+  renderFileList();
+  autoUpload();
+});
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', async e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  const items = [...e.dataTransfer.items];
+  const arr = [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+    if (entry && entry.isDirectory) await readDirEntry(entry, entry.name, arr);
+    else if (entry && entry.isFile) await new Promise(r => entry.file(f => { arr.push({ file: f, rel: f.name }); r(); }, () => r()));
+    else { const f = item.getAsFile(); if (f) arr.push({ file: f, rel: f.name }); }
+  }
+  await processDrop(arr);
+});
+
+async function readDirEntry(entry, base, out) {
+  const reader = entry.createReader();
+  let batch;
+  do {
+    batch = await new Promise(r => reader.readEntries(e => r(e), () => r([])));
+    for (const e of batch) {
+      const p = base ? base + '/' + e.name : e.name;
+      if (e.isDirectory) await readDirEntry(e, p, out);
+      else await new Promise(r => e.file(f => { out.push({ file: f, rel: p }); r(); }, () => r()));
+    }
+  } while (batch.length > 0);
+}
+
+function isArchive(name) {
+  const n = name.toLowerCase();
+  return n.endsWith('.zip') || n.endsWith('.tar') || n.endsWith('.tar.gz') || n.endsWith('.tgz');
+}
+
+async function addArchive(file) {
+  const n = file.name.toLowerCase();
+  if (n.endsWith('.zip')) await addZip(file);
+  else await addTar(file);
+}
+
+async function processDrop(arr) {
+  for (const { file, rel } of arr) {
+    if (isArchive(file.name)) { await addArchive(file); continue; }
+    if (shouldSkip(rel)) { skippedCount++; continue; }
+    files.set(rel, file);
+  }
+  renderFileList();
+  autoUpload();
+}
+
+async function addFileList(fileList, isDir) {
+  for (const f of fileList) {
+    const rel = isDir ? (f.webkitRelativePath || f.name) : f.name;
+    if (!isDir && isArchive(f.name)) { await addArchive(f); continue; }
+    if (shouldSkip(rel)) { skippedCount++; continue; }
+    files.set(rel, f);
+  }
+  renderFileList();
+  autoUpload();
+}
+
+async function waitForJSZip(timeoutMs = 4000) {
+  const start = Date.now();
+  while (typeof JSZip === 'undefined') {
+    if (window._jszipLoadFailed || Date.now() - start > timeoutMs) return false;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return true;
+}
+
+async function addZip(zipFile) {
+  const ready = await waitForJSZip();
+  if (!ready) {
+    setStatus('error',
+      'ZIP extraction library (JSZip) could not be loaded from any CDN — likely blocked by your network/proxy. ' +
+      'Workarounds: (1) extract the ZIP locally and drop the folder into the box, or ' +
+      '(2) use "Pick individual files", or ' +
+      '(3) place the extracted project under uploads/<project-name>/ and click Review.');
+    return;
+  }
+  try {
+    const zip = await JSZip.loadAsync(zipFile);
+    for (const [rel, obj] of Object.entries(zip.files)) {
+      if (obj.dir) continue;
+      const cleanRel = rel.replace(/^\/+/, '');
+      if (shouldSkip(cleanRel)) { skippedCount++; continue; }
+      const blob = await obj.async('blob');
+      const name = cleanRel.split('/').pop();
+      files.set(cleanRel, new File([blob], name));
+    }
+  } catch (e) { setStatus('error', 'ZIP extraction failed: ' + e.message); }
+}
+
+async function addTar(tarFile) {
+  try {
+    let buffer = await tarFile.arrayBuffer();
+    const n = tarFile.name.toLowerCase();
+    if (n.endsWith('.tar.gz') || n.endsWith('.tgz')) {
+      buffer = pako.inflate(new Uint8Array(buffer)).buffer;
+    }
+    extractTarBuffer(buffer);
+  } catch (e) { setStatus('error', 'TAR extraction failed: ' + e.message); }
+}
+
+function extractTarBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let offset = 0;
+
+  while (offset + 512 <= bytes.length) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every(b => b === 0)) break;
+
+    let name = readTarString(header, 0, 100);
+    if (!name) { offset += 512; continue; }
+
+    const prefix = readTarString(header, 345, 155);
+    if (prefix) name = prefix + '/' + name;
+
+    const typeFlag = String.fromCharCode(header[156]);
+    const size = parseInt(readTarString(header, 124, 12).trim(), 8) || 0;
+
+    offset += 512;
+
+    if (typeFlag === '0' || typeFlag === '\0') {
+      const cleanRel = name.replace(/^\/+/, '');
+      if (shouldSkip(cleanRel)) { skippedCount++; }
+      else {
+        const blob = new Blob([bytes.subarray(offset, offset + size)]);
+        const fname = cleanRel.split('/').pop();
+        files.set(cleanRel, new File([blob], fname));
+      }
+    }
+
+    offset += Math.ceil(size / 512) * 512;
+  }
+}
+
+function readTarString(bytes, start, len) {
+  let end = start;
+  while (end < start + len && bytes[end] !== 0) end++;
+  return new TextDecoder().decode(bytes.subarray(start, end));
+}
+
+function resetDashboard() {
+  // Hide findings panel and clear counts
+  const fs = document.getElementById('findingsSummary');
+  if (fs) fs.style.display = 'none';
+  ['countTotal','countHigh','countMedium','countLow'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = '0';
+  });
+  const techs = document.getElementById('countTechs'); if (techs) techs.textContent = '—';
+  const assess = document.getElementById('findingsAssessment');
+  if (assess) { assess.textContent = ''; assess.className = 'assessment'; }
+
+  // Reset gauge
+  const gv = document.getElementById('gaugeValue'); if (gv) gv.textContent = '0';
+  const ga = document.getElementById('gaugeArc'); if (ga) ga.style.strokeDashoffset = '251.2';
+  const gn = document.getElementById('gaugeNeedle');
+  if (gn) gn.setAttribute('transform', 'rotate(-90 100 110)');
+  const gvd = document.getElementById('gaugeVerdict');
+  if (gvd) { gvd.textContent = '—'; gvd.className = 'gauge-verdict verdict-good'; }
+  const gf = document.getElementById('gaugeFormula'); if (gf) gf.innerHTML = '';
+
+  // Reset dimension rows
+  const CLEAN = {
+    security: 'No security issues detected.',
+    scalability: 'No performance issues detected.',
+    maintainability: 'Code is clean.',
+    compliance: 'No compliance issues detected.',
+  };
+  document.querySelectorAll('.dim-row').forEach(row => {
+    const score = row.querySelector('.dimScore');
+    if (score) { score.textContent = '100'; score.style.color = '#22c55e'; }
+    const fill = row.querySelector('.dim-fill');
+    if (fill) { fill.style.width = '0%'; fill.style.background = '#22c55e'; }
+    const note = row.querySelector('.dimNote');
+    if (note) note.innerHTML = CLEAN[row.dataset.dim] || '';
+  });
+
+  // Reset severity distribution bar + legend
+  ['distHigh','distMedium','distLow'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.flex = '0 0 0%'; el.textContent = ''; }
+  });
+  ['legendHigh','legendMedium','legendLow'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = '0';
+  });
+  const lb = document.getElementById('legendBlocks'); if (lb) lb.style.display = 'none';
+  const bc = document.getElementById('blocksCount'); if (bc) bc.textContent = '0';
+
+  // Reset download links + review status
+  ['downloadPdfBtn','downloadXlsxBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.display = 'none'; el.removeAttribute('href'); }
+  });
+  const rs = document.getElementById('reviewStatus');
+  if (rs) { rs.className = 'status-box'; rs.innerHTML = ''; rs.textContent = ''; }
+}
+
+async function clearFiles() {
+  files.clear();
+  uploaded.clear();
+  skippedCount = 0;
+  renderFileList();
+  // Also empty the server-side project folder so a fresh upload starts clean.
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+    try {
+      await fetch(serverBase() + '/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: clean }),
+      });
+    } catch {}
+  }
+  resetDashboard();
+  document.getElementById('reviewBtn').disabled = true;
+  setStatus('info', 'Cleared.');
+}
+
+function renderFileList() {
+  const list = document.getElementById('fileList');
+  const zipBtn  = document.getElementById('zipBtn');
+  if (files.size === 0) {
+    list.innerHTML = '';
+    if (zipBtn) zipBtn.disabled = true;
+    return;
+  }
+  if (zipBtn) zipBtn.disabled = false;
+
+  const arr = [...files.entries()].slice(0, 500);
+  list.innerHTML = arr.map(([rel, f]) => {
+    const ext = rel.split('.').pop().toLowerCase();
+    const icon = iconFor(ext);
+    const color = colorFor(ext);
+    return `<div class="file-row"><i class="ti ${icon}" style="color:${color}"></i><span class="path">${escH(rel)}</span><span class="size">${fmtSize(f.size)}</span></div>`;
+  }).join('');
+  if (files.size > 500) list.innerHTML += `<div class="file-row" style="color:#6b7280">... and ${files.size - 500} more</div>`;
+}
+
+function iconFor(ext) {
+  return {js:'ti-brand-javascript',ts:'ti-brand-typescript',jsx:'ti-brand-react',tsx:'ti-brand-react',cds:'ti-file-code',xml:'ti-code',json:'ti-braces',abap:'ti-server',properties:'ti-language',md:'ti-markdown',html:'ti-brand-html5',css:'ti-brand-css3',yaml:'ti-file',yml:'ti-file',zip:'ti-file-zip',tar:'ti-file-zip',gz:'ti-file-zip',tgz:'ti-file-zip'}[ext] || 'ti-file';
+}
+function colorFor(ext) {
+  return {js:'#f7df1e',ts:'#3178c6',cds:'#a78bfa',abap:'#0faaff',xml:'#f87171',json:'#fb923c',properties:'#4ade80'}[ext] || '#6b7280';
+}
+function fmtSize(b) { if(!b) return '0 B'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ─── Auto-upload to local server (fast path) ──────────────────────────────
+function serverBase() {
+  return (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:5757';
+}
+
+let uploadInFlight = false;
+const uploaded = new Set(); // rel paths already uploaded this session
+async function autoUpload() {
+  if (uploadInFlight) return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+    // Page opened as file://, no server — fall back to Save/ZIP flow.
+    document.getElementById('zipBtn').disabled = files.size === 0;
+    setStatus('warn', 'Page opened without the local server. Use "Download ZIP" and extract into uploads/, or open http://localhost:5757/ instead.');
+    return;
+  }
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+  uploadInFlight = true;
+  const base = serverBase();
+  const pending = [...files.entries()].filter(([rel]) => !uploaded.has(rel));
+  if (pending.length === 0) { uploadInFlight = false; enableReviewButton(); return; }
+
+  // First upload for this project name in this session → wipe the server-side
+  // folder AND every sibling project folder so stale prior runs can't sneak
+  // into the review and disk doesn't accumulate old uploads.
+  if (resetForProject !== clean) {
+    setStatus('info', `Preparing uploads/${clean}/ (removing prior uploads)...`);
+    try {
+      const r = await fetch(base + '/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: clean, purgeSiblings: true }),
+      });
+      try {
+        const j = await r.json();
+        if (j && Array.isArray(j.purged) && j.purged.length) {
+          console.log('[reset] purged sibling project folders:', j.purged);
+        }
+      } catch {}
+      resetForProject = clean;
+      uploaded.clear(); // any earlier "uploaded" markers are now invalid
+    } catch {
+      // non-fatal — proceed and let uploads overwrite
+    }
+  }
+
+  setStatus('info', `Uploading 0/${pending.length}...`);
+  let done = 0, errored = 0;
+  const concurrency = 6;
+  let idx = 0;
+
+  async function worker() {
+    while (idx < pending.length) {
+      const my = idx++;
+      const [rel, file] = pending[my];
+      const url = base + '/api/upload/' + encodeURIComponent(clean) + '/' +
+        rel.split('/').map(encodeURIComponent).join('/');
+      try {
+        const r = await fetch(url, { method: 'PUT', body: file });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        uploaded.add(rel);
+      } catch (e) {
+        errored++;
+        console.warn('upload failed:', rel, e.message);
+      } finally {
+        done++;
+        if (done % 5 === 0 || done === pending.length) {
+          setStatus('info', `Uploading ${done}/${pending.length}...`);
+        }
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, pending.length) }, worker);
+  await Promise.all(workers);
+  uploadInFlight = false;
+
+  const skipNote = skippedCount > 0 ? ` (skipped ${skippedCount} non-SAP file(s): .git/, dist/, node_modules/, appGenInfo.json, package-lock.json, images, etc.)` : '';
+  if (errored > 0) {
+    setStatus('warn', `Uploaded ${done - errored}/${pending.length}. ${errored} file(s) failed — check server console.${skipNote}`);
+  } else {
+    setStatus('success', `Uploaded ${done} file(s) to uploads/${clean}/. Click "Review" to start.${skipNote}`);
+  }
+  enableReviewButton();
+}
+
+// ─── Save to uploads/ via File System Access API ───────────────────────────
+async function saveToUploads() {
+  if (files.size === 0) return;
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+
+  if (!window.showDirectoryPicker) {
+    setStatus('warn', 'This browser does not support the File System Access API. Falling back to ZIP download — extract it into uploads/' + clean + '/ manually.');
+    downloadZip();
+    return;
+  }
+
+  try {
+    setStatus('info', 'Please pick the SAP-Code-Reviewer/uploads/ folder in the picker dialog...');
+    const uploadsDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+
+    // Recreate <project> folder (empty first if exists)
+    let projectDir;
+    try {
+      projectDir = await uploadsDir.getDirectoryHandle(clean, { create: true });
+      // best-effort empty existing children
+      // (skipped for safety — writes just overwrite files)
+    } catch (e) {
+      throw new Error(`Cannot open/create ${clean}/ inside uploads: ${e.message}`);
+    }
+
+    let written = 0;
+    for (const [rel, file] of files) {
+      const parts = rel.split('/');
+      const fname = parts.pop();
+      let dir = projectDir;
+      for (const part of parts) {
+        dir = await dir.getDirectoryHandle(part, { create: true });
+      }
+      const fh = await dir.getFileHandle(fname, { create: true });
+      const w = await fh.createWritable();
+      await w.write(file);
+      await w.close();
+      written++;
+      if (written % 20 === 0) setStatus('info', `Writing... ${written}/${files.size}`);
+    }
+
+    setStatus('success', `Saved ${written} file(s) to uploads/${clean}/. Click "Review" to run the agent, or run in Claude:  /sap-code-reviewer ${clean}`);
+    enableReviewButton();
+  } catch (e) {
+    if (e && e.name === 'AbortError') { setStatus('warn', 'Save cancelled.'); return; }
+    setStatus('error', 'Save failed: ' + e.message + '. Try "Download ZIP" and extract into uploads/ manually.');
+  }
+}
+
+async function downloadZip() {
+  if (files.size === 0) return;
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+  setStatus('info', 'Building ZIP...');
+  const ready = await waitForJSZip();
+  if (!ready) {
+    setStatus('error', 'ZIP builder (JSZip) could not be loaded from any CDN. Use the local server upload path instead (files are already uploaded when the server is running).');
+    return;
+  }
+  const zip = new JSZip();
+  const folder = zip.folder(clean);
+  for (const [rel, file] of files) folder.file(rel, file);
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = clean + '.zip';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  setStatus('success', `Downloaded ${clean}.zip. Extract it inside uploads/ so files land at uploads/${clean}/*.`);
+}
+
+function setStatus(kind, msg) {
+  const box = document.getElementById('statusBox');
+  box.className = 'status-box show ' + kind;
+  box.textContent = msg;
+}
+
+// ─── Review button: calls local server to run /sap-code-reviewer ───────────
+function enableReviewButton() {
+  document.getElementById('reviewBtn').disabled = false;
+}
+
+function setReviewStatus(kind, msg) {
+  const box = document.getElementById('reviewStatus');
+  box.className = 'status-box show ' + kind;
+  box.textContent = msg;
+}
+
+// ─── Health-status graphs ────────────────────────────────────────────────
+// The 4 dimension scores are the source of truth. The overall gauge is the
+// average of the 4 dimensions, minus a small transport-blocker penalty.
+// This guarantees the gauge and the bars can never disagree.
+//
+// Every finding is routed to exactly one dimension. Anything that doesn't
+// match a security/scalability/compliance keyword falls back to
+// Maintainability, so no finding is lost.
+function renderHealth(d) {
+  const CAT_MAP = {
+    security:       ['security', 'auth', 'authorization', 'authentication', 'credential', 'injection', 'xss', 'crypto', 'secret'],
+    scalability:    ['performance', 'scalability', 'db-performance', 'memory', 'pagination', 'paging', 'query', 'efficiency'],
+    compliance:     ['deprecated-api', 'clean-core', 'released-api', 'compliance', 'namespace', 'atc', 'unicode', 'transport', 'released', 'cds', 'rap'],
+    // maintainability = fallback for anything else (correctness, quality,
+    // error-handling, naming, style, testing, docs, i18n, accessibility, …)
+  };
+  const classify = (cat) => {
+    const c = (cat || '').toLowerCase();
+    for (const [dim, keys] of Object.entries(CAT_MAP)) {
+      if (keys.some(k => c.includes(k))) return dim;
+    }
+    return 'maintainability';
+  };
+
+  const scoreFrom = (h, m, l) =>
+    Math.max(0, Math.min(100, 100 - (h * 10 + m * 3 + l * 1)));
+
+  // ── Route findings into dimensions (fallback ensures nothing is lost)
+  // Track BOTH counts and the raw category names so we can tell the user
+  // exactly which Category values to filter on in the Excel report.
+  const buckets = { security:        { high:0, medium:0, low:0, cats:new Set() },
+                    scalability:     { high:0, medium:0, low:0, cats:new Set() },
+                    maintainability: { high:0, medium:0, low:0, cats:new Set() },
+                    compliance:      { high:0, medium:0, low:0, cats:new Set() } };
+  const cb = d.categoryBreakdown || {};
+  for (const cat of Object.keys(cb)) {
+    const dim = classify(cat);
+    buckets[dim].high   += cb[cat].high   || 0;
+    buckets[dim].medium += cb[cat].medium || 0;
+    buckets[dim].low    += cb[cat].low    || 0;
+    if ((cb[cat].total || 0) > 0) buckets[dim].cats.add(cat);
+  }
+
+  // ── Per-dimension score
+  const dimScores = {};
+  const LABEL = {
+    security:        'security',
+    scalability:     'performance / scalability',
+    maintainability: 'maintainability',
+    compliance:      'clean-core / released-API',
+  };
+  const CLEAN_MSG = {
+    security:        'No security issues detected.',
+    scalability:     'No performance issues detected.',
+    maintainability: 'Code is clean.',
+    compliance:      'No compliance issues detected.',
+  };
+  // Build the "trace it in Excel" hint for each dimension.
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const noteFor = (dim, b) => {
+    const n = b.high + b.medium + b.low;
+    if (n === 0) return esc(CLEAN_MSG[dim]);
+    const cats = [...b.cats].sort().map(c => `<code>${esc(c)}</code>`).join(', ');
+    return `${n} ${esc(LABEL[dim])} finding(s). Trace in Excel &rarr; sheet <strong>All Findings</strong>, ` +
+           `filter <strong>Category</strong> = ${cats}.`;
+  };
+  const colorFor = (score) =>
+    score >= 90 ? '#22c55e' :   // Excellent — green
+    score >= 75 ? '#84cc16' :   // Good — lime
+    score >= 60 ? '#fbbf24' :   // Fair — amber
+                  '#fb7185';    // Poor — red
+
+  document.querySelectorAll('.dim-row').forEach(row => {
+    const dim = row.dataset.dim;
+    const b = buckets[dim];
+    const score = scoreFrom(b.high, b.medium, b.low);
+    dimScores[dim] = score;
+    row.querySelector('.dim-fill').style.width = score + '%';
+    row.querySelector('.dim-fill').style.background = colorFor(score);
+    row.querySelector('.dimScore').textContent = score;
+    row.querySelector('.dimScore').style.color = colorFor(score);
+    row.querySelector('.dimNote').innerHTML    = noteFor(dim, b);
+  });
+
+  // ── Overall = average of the 4 dimensions, minus blocker penalty.
+  const avg = (dimScores.security + dimScores.scalability +
+               dimScores.maintainability + dimScores.compliance) / 4;
+  let overall = Math.round(Math.max(0, Math.min(100, avg - (d.blocksTransport * 5))));
+
+  const verdict =
+    overall >= 90 ? { label: 'Excellent', cls: 'verdict-excellent' } :
+    overall >= 75 ? { label: 'Good',      cls: 'verdict-good' } :
+    overall >= 60 ? { label: 'Fair',      cls: 'verdict-fair' } :
+                    { label: 'Poor',      cls: 'verdict-poor' };
+
+  document.getElementById('gaugeValue').textContent = overall;
+  const vEl = document.getElementById('gaugeVerdict');
+  vEl.textContent = verdict.label;
+  vEl.className = 'gauge-verdict ' + verdict.cls;
+
+  // Arc length = 251.2 (π·80). Fill proportional to score.
+  const arcLen = 251.2;
+  document.getElementById('gaugeArc').style.strokeDashoffset = String(arcLen * (1 - overall / 100));
+  // Needle: -90° → +90° across 0 → 100
+  document.getElementById('gaugeNeedle').setAttribute(
+    'transform', `rotate(${-90 + (overall / 100) * 180} 100 110)`);
+
+  const avgRounded = Math.round(avg);
+  const blockerLine = d.blocksTransport > 0
+    ? ` − ${d.blocksTransport * 5} (${d.blocksTransport} blocker${d.blocksTransport > 1 ? 's' : ''})`
+    : '';
+  document.getElementById('gaugeFormula').innerHTML =
+    `Average of 4 dimensions: <strong style="color:#cbd5e1">${avgRounded}</strong>${blockerLine}`;
+
+  // ── Severity distribution bar
+  const total = Math.max(1, d.high + d.medium + d.low);
+  const pctH = (d.high   / total) * 100;
+  const pctM = (d.medium / total) * 100;
+  const pctL = (d.low    / total) * 100;
+  const showText = (pct, n) => pct > 8 ? String(n) : '';
+  const segH = document.getElementById('distHigh');
+  const segM = document.getElementById('distMedium');
+  const segL = document.getElementById('distLow');
+  segH.style.flex = `0 0 ${pctH}%`; segH.textContent = showText(pctH, d.high);
+  segM.style.flex = `0 0 ${pctM}%`; segM.textContent = showText(pctM, d.medium);
+  segL.style.flex = `0 0 ${pctL}%`; segL.textContent = showText(pctL, d.low);
+  document.getElementById('legendHigh').textContent   = d.high;
+  document.getElementById('legendMedium').textContent = d.medium;
+  document.getElementById('legendLow').textContent    = d.low;
+
+  const blk = document.getElementById('legendBlocks');
+  if (d.blocksTransport > 0) {
+    document.getElementById('blocksCount').textContent = d.blocksTransport;
+    blk.style.display = 'inline';
+  } else {
+    blk.style.display = 'none';
+  }
+}
+
+function hasSapSourceSignal() {
+  // Cheap client-side check: look for at least one file that is clearly SAP source.
+  const isSap = (rel) => {
+    const p = rel.toLowerCase();
+    return (
+      p.endsWith('.view.xml') ||
+      p.endsWith('.fragment.xml') ||
+      p.endsWith('.controller.js') ||
+      p.endsWith('component.js') ||
+      p.endsWith('/manifest.json') || p === 'manifest.json' ||
+      p.endsWith('.cds') ||
+      p.endsWith('.abap') ||
+      p.endsWith('.ddls.asddls') ||
+      p.endsWith('.bdef.asbdef') ||
+      /(^|\/)webapp\//.test(p) ||
+      /(^|\/)srv\//.test(p) ||
+      /(^|\/)db\//.test(p) ||
+      /(^|\/)src\/.+\.abap/.test(p)
+    );
+  };
+  for (const rel of files.keys()) if (isSap(rel)) return true;
+  return false;
+}
+
+async function startReview() {
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+
+  if (!hasSapSourceSignal()) {
+    const ok = confirm(
+      'No SAP source files detected in the upload — only config/metadata was found.\n\n' +
+      'Did you upload only the top-level files instead of the whole project folder?\n\n' +
+      'Click OK to review anyway, or Cancel to add source files (webapp/, srv/, db/, *.abap, etc.).'
+    );
+    if (!ok) return;
+  }
+  const btn = document.getElementById('reviewBtn');
+  const pdfLink  = document.getElementById('downloadPdfBtn');
+  const xlsxLink = document.getElementById('downloadXlsxBtn');
+  pdfLink.style.display  = 'none';
+  xlsxLink.style.display = 'none';
+  document.getElementById('findingsSummary').style.display = 'none';
+
+  btn.disabled = true;
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader-2"></i> Reviewing...';
+  document.getElementById('reviewStatus').className = 'status-box';
+  document.getElementById('reviewStatus').textContent = '';
+  startProgress(clean);
+
+  // Server base — same origin if page was loaded from the server, else localhost:5757.
+  const base = (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:5757';
+
+  // Poll for file readiness while the main request is running, so download
+  // links appear the moment files exist — even if claude hasn't exited yet.
+  let pollTimer = setInterval(async () => {
+    try {
+      const s = await fetch(base + '/api/status?project=' + encodeURIComponent(clean));
+      const j = await s.json();
+      if (j.pdfUrl && pdfLink.style.display === 'none') {
+        pdfLink.href = base + j.pdfUrl;
+        pdfLink.setAttribute('download', '');
+        pdfLink.style.display = 'inline-flex';
+        setProgressStage('PDF ready — generating Excel');
+      }
+      if (j.xlsxUrl && xlsxLink.style.display === 'none') {
+        xlsxLink.href = base + j.xlsxUrl;
+        xlsxLink.setAttribute('download', '');
+        xlsxLink.style.display = 'inline-flex';
+        setReviewStatus('success', 'PDF and Excel reports are ready. Click to download.');
+      }
+    } catch {}
+  }, 3000);
+
+  try {
+    const client = (document.getElementById('clientName').value || '').trim();
+    const res = await fetch(base + '/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: clean, client }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const err = (data && data.error) || ('HTTP ' + res.status);
+      const details = [];
+      if (data && typeof data.exitCode !== 'undefined') details.push('exit code: ' + data.exitCode);
+      if (data && data.claudeStderr) details.push('\n--- claude stderr ---\n' + data.claudeStderr);
+      if (data && data.claudeStdout) details.push('\n--- claude stdout ---\n' + data.claudeStdout);
+      const box = document.getElementById('reviewStatus');
+      box.className = 'status-box show error';
+      box.innerHTML = '<div><strong>Review failed:</strong> ' + escH(err) + '</div>' +
+        (details.length ? '<pre style="white-space:pre-wrap;margin-top:8px;font-size:11px;max-height:220px;overflow:auto">' + escH(details.join('\n')) + '</pre>' : '');
+      btn.disabled = false; btn.innerHTML = origHtml;
+      return;
+    }
+
+    const s = data.summary || {};
+    const techs = (data.technologies || []).join(', ') || 'unknown';
+    const total = (data.counts && data.counts.total) || 0;
+    const cachedNote = data.cached
+      ? ` (cached — upload unchanged since last review; hash ${data.sourceHash || '—'})`
+      : '';
+    setReviewStatus('success',
+      `Done. ${total} finding(s) across ${techs}${cachedNote}. ` +
+      `High: ${s.high || 0} · Medium: ${s.medium || 0} · Low: ${s.low || 0}. ` +
+      (s.assessment ? 'Assessment: ' + s.assessment : ''));
+
+    document.getElementById('countTotal').textContent  = total;
+    document.getElementById('countHigh').textContent   = s.high   || 0;
+    document.getElementById('countMedium').textContent = s.medium || 0;
+    document.getElementById('countLow').textContent    = s.low    || 0;
+    document.getElementById('countTechs').textContent  = techs;
+    document.getElementById('findingsAssessment').textContent = s.assessment ? 'Assessment: ' + s.assessment : '';
+    document.getElementById('findingsSummary').style.display = 'block';
+    renderHealth({
+      high:   s.high   || 0,
+      medium: s.medium || 0,
+      low:    s.low    || 0,
+      total:  total,
+      categoryBreakdown: data.categoryBreakdown || {},
+      blocksTransport:   data.blocksTransport   || 0,
+    });
+
+    if (data.pdfUrl) {
+      pdfLink.href = base + data.pdfUrl;
+      pdfLink.setAttribute('download', '');
+      pdfLink.style.display = 'inline-flex';
+    }
+    if (data.xlsxUrl) {
+      xlsxLink.href = base + data.xlsxUrl;
+      xlsxLink.setAttribute('download', '');
+      xlsxLink.style.display = 'inline-flex';
+    }
+  } catch (e) {
+    setReviewStatus('error',
+      'Could not reach the review server. Start it with:  node scripts/server.js  ' +
+      '(or use start.cmd). Details: ' + e.message);
+  } finally {
+    clearInterval(pollTimer);
+    stopProgress();
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+}
+
+// ─── Review progress bar + elapsed timer ──────────────────────────────────
+let progressTimer = null;
+let progressStart = 0;
+function startProgress(project) {
+  const wrap = document.getElementById('progressWrap');
+  wrap.classList.add('show');
+  setProgressStage(`Reviewing ${project}`);
+  document.getElementById('progressNote').textContent =
+    'The Claude agent is scanning files. Larger projects can take several minutes — this is normal.';
+  progressStart = Date.now();
+  updateElapsed();
+  progressTimer = setInterval(updateElapsed, 1000);
+}
+function updateElapsed() {
+  const secs = Math.floor((Date.now() - progressStart) / 1000);
+  const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+  const ss = String(secs % 60).padStart(2, '0');
+  document.getElementById('progressElapsed').textContent = `${mm}:${ss}`;
+  const note = document.getElementById('progressNote');
+  if (secs === 180) note.textContent = 'Still working — this project is on the larger side. Hang tight.';
+  else if (secs === 360) note.textContent = 'Long-running review. If nothing appears by 8 minutes the server will time out and surface an error.';
+}
+function setProgressStage(text) {
+  document.getElementById('progressStage').textContent = text;
+}
+function stopProgress() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  document.getElementById('progressWrap').classList.remove('show');
+}
+</script>
+</body>
+</html>
