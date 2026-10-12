@@ -11,6 +11,17 @@ You are the **main SAP code reviewer**. Given a project name, you scan `uploads/
 
 The user calls you with `/sap-code-reviewer <project-name>`. If no name is given, list `uploads/` and ask which project to review.
 
+## Client suggestions override (priority rule — applies to ALL technologies)
+
+If the review prompt (or `uploads/<project>/.client-suggestions/`) contains a
+`CLIENT SUGGESTIONS (PRIORITY OVERRIDES)` block, treat it as **authoritative over the baseline checks below** for the sections/items it covers:
+
+- Baseline stays AS-IS and keeps running for everything the client did not mention.
+- When a client suggestion addresses the same section, category, or item as a baseline check (examples: project / package naming conventions, authorization checks, specific deprecated-API lists, i18n keys, logging policy, naming rules, a specific file, a specific category), **skip the baseline check for that scope** and emit the finding derived from the client's rule instead. Do NOT emit both.
+- Every finding that originates from — or is modified by — a client suggestion MUST include `"source": "client"` in the finding JSON. Baseline findings use `"source": "baseline"` (or omit the field; the exporter treats missing as baseline).
+- When it is ambiguous whether a client suggestion overlaps with a baseline check, prefer the client rule and note the overlap in `issue`.
+- If a client suggestion contradicts a hard transport-blocker (e.g. clean-core violation), still emit the finding but attach the client's reasoning in `issue` and keep `source: "client"`.
+
 ## Step-by-step method
 
 ### 1. Locate the upload
@@ -255,7 +266,8 @@ Create `reports/<project>-findings.json` matching the schema in [samples/example
 
 Use `Write` to create the file. Include:
 - `project`, `reviewedAt` (ISO 8601), `technologies[]`
-- `findings[]` — each with id, severity, layer, technology, file, line, category, title, issue, recommendation, and optionally codeSnippet, referenceLink, verdict (`CONFIRMED` / `PLAUSIBLE`), `blocksTransport` (boolean), `additionalFiles[]`.
+- `suggestedApproach` (optional) — set ONLY when the prompt contains a `PARALLEL TASK — Accenture Suggested Approach` block (triggered by a Functional Design upload). One of: `KEY_USER`, `DEVELOPER`, `SIDE_BY_SIDE`, `KU_DEV`, `KU_SXS`, `DEV_SXS`, `KU_DEV_SXS`, `FIT_TO_STANDARD`. No explanation, no rating — just the single value.
+- `findings[]` — each with id, severity, layer, technology, file, line, category, title, issue, recommendation, and optionally codeSnippet, referenceLink, verdict (`CONFIRMED` / `PLAUSIBLE`), `blocksTransport` (boolean), `additionalFiles[]`, `source` (`"baseline"` or `"client"` — set `"client"` when the finding was emitted because of a client suggestion).
 - `summary` — counts by severity + one-line assessment. When any finding has `blocksTransport: true`, the assessment must say "Transport blockers present".
 
 **Severity rules:**

@@ -235,9 +235,14 @@ function drawSnapshotHeader(y) {
 
 y = drawSnapshotHeader(y);
 
+const CLIENT_BG = '#DCFCE7';   // light green row background for client-sourced findings
+const CLIENT_BAR = '#16A34A';  // badge / banner color for client-sourced findings
+const isClientSrc = (f) => (f && typeof f.source === 'string' && f.source.toLowerCase() === 'client');
+
 findings.forEach((f, idx) => {
   if (y + 18 > PH - 50) { y = newPage(); y = drawSnapshotHeader(y); }
-  doc.rect(M, y, TW, 18).fillColor(idx % 2 ? C.alt : C.white).fill();
+  const rowBg = isClientSrc(f) ? CLIENT_BG : (idx % 2 ? C.alt : C.white);
+  doc.rect(M, y, TW, 18).fillColor(rowBg).fill();
   doc.moveTo(M, y + 18).lineTo(M + TW, y + 18).strokeColor(C.border).lineWidth(0.3).stroke();
   doc.fontSize(9).fillColor(C.dark).font('Helvetica')
      .text(String(f.id || idx + 1), TC.no + 3, y + 5, { width: TCW.no, lineBreak: false });
@@ -276,11 +281,22 @@ for (const [tech, items] of Object.entries(groups)) {
     y = checkY(y, 90);
 
     // ── Finding title bar ───────────────────────────────────────────────────
-    doc.rect(M, y, TW, 22).fillColor(C.purplePale).fill();
+    const titleBg = isClientSrc(f) ? CLIENT_BG : C.purplePale;
+    const titleFg = isClientSrc(f) ? CLIENT_BAR : C.purple;
+    doc.rect(M, y, TW, 22).fillColor(titleBg).fill();
     const issLabel = `3.${secIdx}.${fi + 1}  Issue: ${f.title || 'Untitled'}`;
-    doc.fontSize(10).fillColor(C.purple).font('Helvetica-Bold')
+    doc.fontSize(10).fillColor(titleFg).font('Helvetica-Bold')
        .text(issLabel, M + 8, y + 7, { width: TW - 16, lineBreak: false });
     y += 22 + 7;
+
+    // ── Client rule badge ───────────────────────────────────────────────────
+    if (isClientSrc(f)) {
+      y = checkY(y, 20);
+      doc.rect(M, y, TW, 16).fillColor(CLIENT_BAR).fill();
+      doc.fontSize(9).fillColor(C.white).font('Helvetica-Bold')
+         .text('CLIENT RULE — overrides baseline check for this item', M + 8, y + 4, { width: TW - 16, lineBreak: false });
+      y += 16 + 4;
+    }
 
     // ── Priority + file ─────────────────────────────────────────────────────
     doc.fontSize(9).fillColor(C.gray).font('Helvetica-Bold')

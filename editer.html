@@ -160,6 +160,52 @@
     </div>
   </div>
 
+  <!-- Card 1a : Functional Design (optional — triggers approach suggestion) -->
+  <div class="card">
+    <h3><span class="num">1a</span> Functional Design <span style="color:#6b7280;font-weight:400;font-size:12px">(optional)</span></h3>
+    <p style="color:#9ca3af;font-size:13px;margin-bottom:12px">
+      Upload the Functional Design — <strong>only <code>.doc</code> or <code>.docx</code>
+      files are accepted</strong>. The agent runs the code review and the
+      <strong style="color:#a78bfa">Accenture Suggested Approach</strong> analysis
+      <strong>in parallel</strong> and writes both into the report. If the suggested approach
+      differs from the one followed in the uploaded code, it's highlighted on page 1 of the Excel.
+    </p>
+    <div class="btn-row">
+      <button class="btn" onclick="document.getElementById('fdInput').click()">
+        <i class="ti ti-file-text"></i> Pick FD file
+      </button>
+      <button class="btn" onclick="clearFd()">
+        <i class="ti ti-trash"></i> Clear
+      </button>
+    </div>
+    <input type="file" id="fdInput" style="display:none" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
+    <div class="file-list" id="fdList"></div>
+    <div class="status-box" id="fdStatus"></div>
+  </div>
+
+  <!-- Card 1b : Client suggestions (optional override rules) -->
+  <div class="card">
+    <h3><span class="num">1b</span> Client suggestions <span style="color:#6b7280;font-weight:400;font-size:12px">(optional)</span></h3>
+    <p style="color:#9ca3af;font-size:13px;margin-bottom:12px">
+      Upload a <code>.txt</code>, <code>.md</code>, <code>.csv</code> or <code>.xlsx</code> file with
+      client-specific review rules (project naming, auth policies, allowed/forbidden APIs, etc.).
+      These rules <strong style="color:#a78bfa">take priority over the baseline review</strong> for
+      the sections they cover — findings sourced from them are highlighted with a different color
+      in the Excel &amp; PDF reports. Baseline stays unchanged for everything else.
+    </p>
+    <div class="btn-row">
+      <button class="btn" onclick="document.getElementById('suggestionsInput').click()">
+        <i class="ti ti-file-upload"></i> Pick suggestions file
+      </button>
+      <button class="btn" onclick="clearSuggestions()">
+        <i class="ti ti-trash"></i> Clear
+      </button>
+    </div>
+    <input type="file" id="suggestionsInput" style="display:none" accept=".txt,.md,.csv,.tsv,.log,.xlsx,.xls,.xlsm" multiple>
+    <div class="file-list" id="suggestionsList"></div>
+    <div class="status-box" id="suggestionsStatus"></div>
+  </div>
+
   <!-- Card 2 : Upload (streams straight into uploads/ via the local server) -->
   <div class="card">
     <h3><span class="num">2</span> Add files</h3>
@@ -836,6 +882,110 @@ async function downloadZip() {
 
 function setStatus(kind, msg) {
   const box = document.getElementById('statusBox');
+  box.className = 'status-box show ' + kind;
+  box.textContent = msg;
+}
+
+// ─── Functional Design upload (triggers approach suggestion) ───────────────
+const fdFiles = new Map();
+document.getElementById('fdInput').addEventListener('change', async e => {
+  const list = [...e.target.files];
+  e.target.value = '';
+  if (!list.length) return;
+  // Hard client-side guard: FD accepts .doc / .docx only.
+  const bad = list.filter(f => !/\.(docx?|DOCX?)$/.test(f.name));
+  if (bad.length) {
+    setFdStatus('error', `Only .doc or .docx files are accepted for the Functional Design. Rejected: ${bad.map(b => b.name).join(', ')}`);
+    return;
+  }
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+    setFdStatus('warn', 'FD upload requires the local server. Open http://localhost:5757/ instead.');
+    return;
+  }
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+  const base = serverBase();
+  let ok = 0, fail = 0;
+  for (const f of list) {
+    try {
+      const r = await fetch(base + '/api/upload-fd/' + encodeURIComponent(clean) + '/' + encodeURIComponent(f.name), {
+        method: 'PUT', body: f,
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      fdFiles.set(f.name, f);
+      ok++;
+    } catch (err) { fail++; console.warn('FD upload failed:', f.name, err.message); }
+  }
+  renderFdList();
+  if (fail === 0) setFdStatus('success', `Uploaded ${ok} FD file(s). Approach suggestion will run alongside the review.`);
+  else setFdStatus('warn', `Uploaded ${ok}, failed ${fail}. Check server console.`);
+});
+async function clearFd() {
+  fdFiles.clear();
+  renderFdList();
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+    try { await fetch(serverBase() + '/api/upload-fd/' + encodeURIComponent(clean), { method: 'DELETE' }); } catch {}
+  }
+  setFdStatus('info', 'Cleared functional design.');
+}
+function renderFdList() {
+  const list = document.getElementById('fdList');
+  if (fdFiles.size === 0) { list.innerHTML = ''; return; }
+  list.innerHTML = [...fdFiles.entries()].map(([name, f]) =>
+    `<div class="file-row"><i class="ti ti-file-text" style="color:#a78bfa"></i><span class="path">${escH(name)}</span><span class="size">${fmtSize(f.size)}</span></div>`
+  ).join('');
+}
+function setFdStatus(kind, msg) {
+  const box = document.getElementById('fdStatus');
+  box.className = 'status-box show ' + kind;
+  box.textContent = msg;
+}
+
+// ─── Client suggestions upload ─────────────────────────────────────────────
+const suggestionsFiles = new Map();
+document.getElementById('suggestionsInput').addEventListener('change', async e => {
+  const list = [...e.target.files];
+  e.target.value = '';
+  if (!list.length) return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+    setSuggestionsStatus('warn', 'Suggestions upload requires the local server. Open http://localhost:5757/ instead.');
+    return;
+  }
+  const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+  const base = serverBase();
+  let ok = 0, fail = 0;
+  for (const f of list) {
+    try {
+      const r = await fetch(base + '/api/upload-suggestions/' + encodeURIComponent(clean) + '/' + encodeURIComponent(f.name), {
+        method: 'PUT', body: f,
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      suggestionsFiles.set(f.name, f);
+      ok++;
+    } catch (err) { fail++; console.warn('suggestions upload failed:', f.name, err.message); }
+  }
+  renderSuggestionsList();
+  if (fail === 0) setSuggestionsStatus('success', `Uploaded ${ok} suggestion file(s). They will override baseline checks on next review.`);
+  else setSuggestionsStatus('warn', `Uploaded ${ok}, failed ${fail}. Check server console.`);
+});
+async function clearSuggestions() {
+  suggestionsFiles.clear();
+  renderSuggestionsList();
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    const clean = (projName.value.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '')) || 'sap-app';
+    try { await fetch(serverBase() + '/api/upload-suggestions/' + encodeURIComponent(clean), { method: 'DELETE' }); } catch {}
+  }
+  setSuggestionsStatus('info', 'Cleared client suggestions.');
+}
+function renderSuggestionsList() {
+  const list = document.getElementById('suggestionsList');
+  if (suggestionsFiles.size === 0) { list.innerHTML = ''; return; }
+  list.innerHTML = [...suggestionsFiles.entries()].map(([name, f]) =>
+    `<div class="file-row"><i class="ti ti-file-text" style="color:#a78bfa"></i><span class="path">${escH(name)}</span><span class="size">${fmtSize(f.size)}</span></div>`
+  ).join('');
+}
+function setSuggestionsStatus(kind, msg) {
+  const box = document.getElementById('suggestionsStatus');
   box.className = 'status-box show ' + kind;
   box.textContent = msg;
 }

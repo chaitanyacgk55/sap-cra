@@ -44,6 +44,7 @@ const COLUMNS = [
   { key: 'severity',       header: 'Severity',         width: 10 },
   { key: 'severityRationale', header: 'Severity Rationale', width: 46 },
   { key: 'blocksTransport',header: 'Blocks Transport', width: 8 },
+  { key: 'source',         header: 'Source',           width: 10 },
   { key: 'technology',     header: 'Technology',       width: 14 },
   { key: 'layer',          header: 'Layer',            width: 10 },
   { key: 'category',       header: 'Category',         width: 14 },
@@ -55,6 +56,12 @@ const COLUMNS = [
   { key: 'codeSnippet',    header: 'Code Snippet',     width: 40 },
   { key: 'referenceLink',  header: 'Reference',        width: 40 },
 ];
+
+// Rows whose finding originated from a client suggestion get this fill so
+// reviewers can tell at a glance which rules came from the client vs. the
+// baseline SAP ruleset.
+const CLIENT_ROW_FILL   = 'FFBBF7D0'; // light green
+const CLIENT_SOURCE_PILL = 'FF16A34A'; // darker green badge
 
 const SEVERITY_COLORS = {
   High:   'FFFB7185',
@@ -76,11 +83,13 @@ function addFindingsSheet(workbook, name, list) {
   });
 
   list.forEach(f => {
+    const isClient = (f.source || '').toLowerCase() === 'client';
     const row = sheet.addRow({
       id:              f.id ?? '',
       severity:        f.severity ?? '',
       severityRationale: f.severityRationale ?? '',
       blocksTransport: f.blocksTransport === true ? 'YES' : '',
+      source:          isClient ? 'Client' : 'Baseline',
       technology:      f.technology ?? '',
       layer:           f.layer ?? '',
       category:        f.category ?? '',
@@ -103,6 +112,17 @@ function addFindingsSheet(workbook, name, list) {
       row.getCell('blocksTransport').font = { bold: true, color: { argb: 'FFFFFFFF' } };
       row.getCell('blocksTransport').alignment = { vertical: 'middle', horizontal: 'center' };
     }
+    if (isClient) {
+      // Highlight the entire row so client-sourced rules are instantly
+      // visually distinct from baseline findings.
+      row.eachCell({ includeEmpty: false }, cell => {
+        if (cell.fill && cell.fill.fgColor) return; // keep severity/blocker pills
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CLIENT_ROW_FILL } };
+      });
+      row.getCell('source').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CLIENT_SOURCE_PILL } };
+      row.getCell('source').font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      row.getCell('source').alignment = { vertical: 'middle', horizontal: 'center' };
+    }
   });
 
   sheet.autoFilter = { from: 'A1', to: { row: 1, column: COLUMNS.length } };
@@ -122,11 +142,37 @@ async function main() {
   const low    = findings.filter(f => f.severity === 'Low').length;
   const assessment = high ? 'Blockers present' : findings.length ? 'Review minor fixes before merge' : 'Ready for merge';
 
+  const clientCount = findings.filter(f => (f.source || '').toLowerCase() === 'client').length;
+  const baselineCount = findings.length - clientCount;
+
+  // Derive the "Followed approach" from the detected technologies — the
+  // extensibility rung the code actually uses.
+  const techs = (data.technologies ?? []).map(t => String(t).toLowerCase());
+  const hasUI5  = techs.some(t => t.includes('ui5') || t.includes('fiori'));
+  const hasCAP  = techs.some(t => t === 'cap' || t.includes('capm'));
+  const hasRAP  = techs.includes('rap');
+  const hasABAP = techs.some(t => t.includes('abap'));
+  function deriveFollowed() {
+    const dev = hasRAP || hasABAP;
+    const sxs = hasCAP || (hasUI5 && !dev); // UI5 alone → BTP side-by-side
+    if (dev && sxs) return 'DEV_SXS';
+    if (dev)       return 'DEVELOPER';
+    if (sxs)       return 'SIDE_BY_SIDE';
+    return 'UNKNOWN';
+  }
+  const followedApproach  = (data.followedApproach  && String(data.followedApproach).toUpperCase())  || deriveFollowed();
+  const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toUpperCase()) || '';
+  const approachMismatch  = suggestedApproach && followedApproach !== 'UNKNOWN'
+                            && suggestedApproach !== followedApproach;
+
   const rows = [
     ['SAP Code Review', ''],
     ['Project',       data.project     ?? project],
     ['Reviewed at',   data.reviewedAt  ?? new Date().toISOString()],
     ['Technologies',  (data.technologies ?? []).join(', ')],
+    [],
+    ['Accenture Suggested Approach', suggestedApproach || '— (no Functional Design uploaded)'],
+    ['Followed Approach',            followedApproach],
     [],
     ['Severity',      'Count'],
     ['High',          high],
@@ -134,18 +180,47 @@ async function main() {
     ['Low',           low],
     ['Total',         findings.length],
     [],
+    ['Source',        'Count'],
+    ['Baseline',      baselineCount],
+    ['Client',        clientCount],
+    [],
     ['Assessment',    assessment],
   ];
   rows.forEach(r => summary.addRow(r));
 
   summary.getRow(1).font = { bold: true, size: 14, color: { argb: 'FF6D28D9' } };
-  summary.getRow(6).font = { bold: true };
+
+  // Approach rows (6 = Suggested, 7 = Followed). Highlight amber if they
+  // differ so the mismatch is unmissable on page 1.
+  const APPROACH_LABEL_FILL = 'FFEDE9FE';   // light purple
+  const APPROACH_MISMATCH   = 'FFFBBF24';   // amber
+  summary.getRow(6).getCell(1).font = { bold: true, color: { argb: 'FF6D28D9' } };
+  summary.getRow(7).getCell(1).font = { bold: true, color: { argb: 'FF6D28D9' } };
+  summary.getRow(6).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: APPROACH_LABEL_FILL } };
+  summary.getRow(7).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: APPROACH_LABEL_FILL } };
+  if (approachMismatch) {
+    [6, 7].forEach(rn => {
+      summary.getRow(rn).getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: APPROACH_MISMATCH } };
+      summary.getRow(rn).getCell(2).font = { bold: true, color: { argb: 'FF1F2937' } };
+    });
+    summary.addRow([]);
+    const warnRow = summary.addRow([
+      'APPROACH MISMATCH',
+      `Accenture suggested "${suggestedApproach}" but the uploaded code follows "${followedApproach}".`,
+    ]);
+    warnRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: APPROACH_MISMATCH } };
+    warnRow.getCell(1).font = { bold: true, color: { argb: 'FF1F2937' } };
+    warnRow.getCell(2).font = { italic: true, color: { argb: 'FF92400E' } };
+  }
+
+  summary.getRow(9).font = { bold: true };     // "Severity" header
   ['High', 'Medium', 'Low'].forEach((sev, i) => {
-    const rowNum = 7 + i;
+    const rowNum = 10 + i;
     summary.getRow(rowNum).getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SEVERITY_COLORS[sev] } };
     summary.getRow(rowNum).getCell(1).font = { bold: true, color: { argb: 'FF1F2937' } };
   });
-  summary.getRow(12).font = { bold: true };
+  summary.getRow(15).font = { bold: true };    // "Source" header
+  summary.getRow(19).font = { bold: true };    // "Assessment" label
 
   // Findings sheets
   addFindingsSheet(workbook, 'All Findings', findings);

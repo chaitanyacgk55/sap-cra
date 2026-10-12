@@ -7,6 +7,10 @@ model: sonnet
 
 You are a **senior RAP reviewer**. Perform a rigorous, read-only review of an uploaded RAP business object.
 
+## Client suggestions override (priority rule)
+
+If the review prompt (or `uploads/<project>/.client-suggestions/`) contains a `CLIENT SUGGESTIONS (PRIORITY OVERRIDES)` block, it takes priority over the baseline checks below for the sections/items it covers (naming, auth, deprecated APIs, a specific behavior definition, etc.). Skip the baseline check for that scope and emit the finding from the client rule instead. Mark such findings with `"source": "client"`; baseline findings use `"source": "baseline"` (or omit). Baseline keeps running unchanged for every area the client did not mention.
+
 ## Method
 
 1. Locate under `uploads/<project-name>/`.

@@ -12,6 +12,169 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const { URL } = require('url');
+let ExcelJS = null;
+try { ExcelJS = require('exceljs'); } catch { /* only needed when a client uploads .xlsx suggestions */ }
+
+// Folder (inside uploads/<project>/) that stores client-supplied review
+// suggestions. Prefixed with a dot so it is naturally skipped by the
+// SAP source scanner yet still part of the hashed upload (so cache
+// invalidates when the suggestions change).
+const CLIENT_SUGGESTIONS_DIR = '.client-suggestions';
+const FUNCTIONAL_DESIGN_DIR = '.functional-design';
+
+// Minimal .docx text extractor using Node's built-in zlib. A .docx is a
+// ZIP whose main payload is word/document.xml. We locate the ZIP's
+// End-of-Central-Directory (EOCD) record, walk the central-directory
+// entries, inflate the deflate stream for document.xml, strip XML tags
+// and newline/paragraph markers, and return plain text.
+const zlib = require('zlib');
+function extractDocxText(buf) {
+  // Locate EOCD by scanning backwards from the end (max comment = 65 535).
+  const EOCD_SIG = 0x06054b50;
+  const CDFH_SIG = 0x02014b50;
+  const LFH_SIG  = 0x04034b50;
+  let eocd = -1;
+  const maxBack = Math.min(buf.length, 66000);
+  for (let i = buf.length - 22; i >= buf.length - maxBack; i--) {
+    if (i < 0) break;
+    if (buf.readUInt32LE(i) === EOCD_SIG) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('not a ZIP / .docx — EOCD not found');
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  const cdSize   = buf.readUInt32LE(eocd + 12);
+  const cdEnd    = cdOffset + cdSize;
+  let p = cdOffset;
+  let docEntry = null;
+  while (p + 46 <= cdEnd) {
+    if (buf.readUInt32LE(p) !== CDFH_SIG) break;
+    const compMethod = buf.readUInt16LE(p + 10);
+    const compSize   = buf.readUInt32LE(p + 20);
+    const nameLen    = buf.readUInt16LE(p + 28);
+    const extraLen   = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localHdr   = buf.readUInt32LE(p + 42);
+    const name       = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
+    if (name === 'word/document.xml') {
+      docEntry = { compMethod, compSize, localHdr };
+      break;
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  if (!docEntry) throw new Error('word/document.xml not found inside .docx');
+  if (buf.readUInt32LE(docEntry.localHdr) !== LFH_SIG) throw new Error('malformed .docx (bad local header)');
+  const lhNameLen  = buf.readUInt16LE(docEntry.localHdr + 26);
+  const lhExtraLen = buf.readUInt16LE(docEntry.localHdr + 28);
+  const dataStart  = docEntry.localHdr + 30 + lhNameLen + lhExtraLen;
+  const payload    = buf.slice(dataStart, dataStart + docEntry.compSize);
+  const xmlBuf = docEntry.compMethod === 0
+    ? payload
+    : zlib.inflateRawSync(payload);
+  const xml = xmlBuf.toString('utf8');
+  // Preserve paragraph / line breaks before stripping tags.
+  const normalized = xml
+    .replace(/<w:p[\s>][^>]*>/g, '\n')
+    .replace(/<w:br\s*\/?>/g, '\n')
+    .replace(/<w:tab\s*\/?>/g, '\t')
+    .replace(/<[^>]+>/g, '');
+  // Decode a few XML entities.
+  return normalized
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Best-effort .doc (legacy OLE2 binary) text extraction. The OLE2 format
+// is non-trivial; this just salvages the printable ASCII/UTF-16LE runs,
+// which is usually enough to identify functional-design keywords.
+function extractDocText(buf) {
+  // Try UTF-16LE first (Word stores body text as UCS2 in most .doc files).
+  const u16 = [];
+  for (let i = 0; i + 1 < buf.length; i += 2) {
+    const code = buf.readUInt16LE(i);
+    if (code === 0x09 || code === 0x0A || code === 0x0D || (code >= 0x20 && code <= 0x7E)) {
+      u16.push(String.fromCharCode(code));
+    } else if (u16.length && u16[u16.length - 1] !== '\n') {
+      u16.push('\n');
+    }
+  }
+  const text = u16.join('').replace(/\n{3,}/g, '\n\n').trim();
+  if (text.length > 200) return text;
+  // Fallback: ASCII-only scrape.
+  return buf.toString('latin1').replace(/[^\x09\x0A\x0D\x20-\x7E]+/g, ' ').trim();
+}
+
+// Read every .doc / .docx file under uploads/<project>/.functional-design/
+// and return a single plain-text block for the agent prompt.
+async function loadFunctionalDesign(uploadDir) {
+  const dir = path.join(uploadDir, FUNCTIONAL_DESIGN_DIR);
+  if (!fs.existsSync(dir)) return '';
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return ''; }
+  const chunks = [];
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    const ext = path.extname(e.name).toLowerCase();
+    if (ext !== '.doc' && ext !== '.docx') continue;    // hard filter
+    const full = path.join(dir, e.name);
+    try {
+      const buf = fs.readFileSync(full);
+      const text = ext === '.docx' ? extractDocxText(buf) : extractDocText(buf);
+      const clipped = text.slice(0, 100000);
+      chunks.push(`----- FILE: ${e.name} -----\n${clipped}`);
+    } catch (err) {
+      chunks.push(`----- FILE: ${e.name} (parse error: ${err.message}) -----`);
+    }
+  }
+  return chunks.join('\n\n');
+}
+
+// Read all files under uploads/<project>/.client-suggestions/ and return
+// one plain-text block the agent can read inline. Supports .txt / .md /
+// .csv as raw text; .xlsx / .xls via exceljs (if available).
+async function loadClientSuggestions(uploadDir) {
+  const dir = path.join(uploadDir, CLIENT_SUGGESTIONS_DIR);
+  if (!fs.existsSync(dir)) return '';
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return ''; }
+  const chunks = [];
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    const full = path.join(dir, e.name);
+    const ext = path.extname(e.name).toLowerCase();
+    try {
+      if (ext === '.txt' || ext === '.md' || ext === '.csv' || ext === '.tsv' || ext === '.log') {
+        chunks.push(`----- FILE: ${e.name} -----\n` + fs.readFileSync(full, 'utf8').trim());
+      } else if ((ext === '.xlsx' || ext === '.xls' || ext === '.xlsm') && ExcelJS) {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.readFile(full);
+        const sheetTexts = [];
+        wb.eachSheet(sheet => {
+          const lines = [`## Sheet: ${sheet.name}`];
+          sheet.eachRow({ includeEmpty: false }, row => {
+            const cells = [];
+            row.eachCell({ includeEmpty: false }, c => {
+              const v = c.value;
+              if (v == null) cells.push('');
+              else if (typeof v === 'object' && v.richText) cells.push(v.richText.map(r => r.text).join(''));
+              else if (typeof v === 'object' && v.text) cells.push(String(v.text));
+              else cells.push(String(v));
+            });
+            lines.push(cells.join(' | '));
+          });
+          sheetTexts.push(lines.join('\n'));
+        });
+        chunks.push(`----- FILE: ${e.name} -----\n` + sheetTexts.join('\n\n'));
+      } else {
+        chunks.push(`----- FILE: ${e.name} (binary/unsupported — skipped) -----`);
+      }
+    } catch (err) {
+      chunks.push(`----- FILE: ${e.name} (parse error: ${err.message}) -----`);
+    }
+  }
+  return chunks.join('\n\n');
+}
 
 // Content-hash of an upload folder + all agent .md files. Guarantees
 // "same bytes in → same review out" by keying the findings JSON on the
@@ -167,6 +330,76 @@ function runProcess(cmd, args, opts = {}) {
   });
 }
 
+// PUT /api/upload-suggestions/<project>/<filename>
+// Writes client suggestion files to uploads/<project>/.client-suggestions/.
+async function handleUploadSuggestions(req, res, url) {
+  const parts = url.pathname.replace(/^\/api\/upload-suggestions\//, '').split('/').filter(Boolean);
+  if (parts.length < 2) return sendJson(res, 400, { ok: false, error: 'project and filename required' });
+  const project = sanitizeProject(decodeURIComponent(parts[0]));
+  if (!project) return sendJson(res, 400, { ok: false, error: 'invalid project name' });
+  const filename = decodeURIComponent(parts.slice(1).join('/'));
+  if (filename.includes('/') || filename.includes('\\') || filename === '.' || filename === '..') {
+    return sendJson(res, 400, { ok: false, error: 'invalid filename' });
+  }
+  const dir = path.join(ROOT, 'uploads', project, CLIENT_SUGGESTIONS_DIR);
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch (e) { return sendJson(res, 500, { ok: false, error: 'mkdir failed: ' + e.message }); }
+  const target = path.join(dir, filename);
+  if (!target.startsWith(dir + path.sep)) return sendJson(res, 400, { ok: false, error: 'path escapes directory' });
+  const ws = fs.createWriteStream(target);
+  req.pipe(ws);
+  ws.on('finish', () => sendJson(res, 200, { ok: true, path: `uploads/${project}/${CLIENT_SUGGESTIONS_DIR}/${filename}` }));
+  ws.on('error', () => { try { res.destroy(); } catch {} });
+  req.on('error', () => { try { ws.destroy(); } catch {} });
+}
+
+// PUT /api/upload-fd/<project>/<filename> — functional-design document.
+// Restricted to .doc / .docx only.
+async function handleUploadFd(req, res, url) {
+  const parts = url.pathname.replace(/^\/api\/upload-fd\//, '').split('/').filter(Boolean);
+  if (parts.length < 2) return sendJson(res, 400, { ok: false, error: 'project and filename required' });
+  const project = sanitizeProject(decodeURIComponent(parts[0]));
+  if (!project) return sendJson(res, 400, { ok: false, error: 'invalid project name' });
+  const filename = decodeURIComponent(parts.slice(1).join('/'));
+  if (filename.includes('/') || filename.includes('\\') || filename === '.' || filename === '..') {
+    return sendJson(res, 400, { ok: false, error: 'invalid filename' });
+  }
+  if (!/\.(docx?|DOCX?)$/.test(filename)) {
+    return sendJson(res, 400, { ok: false, error: 'Only .doc or .docx files are accepted for the Functional Design' });
+  }
+  const dir = path.join(ROOT, 'uploads', project, FUNCTIONAL_DESIGN_DIR);
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch (e) { return sendJson(res, 500, { ok: false, error: 'mkdir failed: ' + e.message }); }
+  const target = path.join(dir, filename);
+  if (!target.startsWith(dir + path.sep)) return sendJson(res, 400, { ok: false, error: 'path escapes directory' });
+  const ws = fs.createWriteStream(target);
+  req.pipe(ws);
+  ws.on('finish', () => sendJson(res, 200, { ok: true, path: `uploads/${project}/${FUNCTIONAL_DESIGN_DIR}/${filename}` }));
+  ws.on('error', () => { try { res.destroy(); } catch {} });
+  req.on('error', () => { try { ws.destroy(); } catch {} });
+}
+
+async function handleClearFd(req, res, url) {
+  const parts = url.pathname.replace(/^\/api\/upload-fd\//, '').split('/').filter(Boolean);
+  const project = sanitizeProject(decodeURIComponent(parts[0] || ''));
+  if (!project) return sendJson(res, 400, { ok: false, error: 'project required' });
+  const dir = path.join(ROOT, 'uploads', project, FUNCTIONAL_DESIGN_DIR);
+  try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); }
+  catch (e) { return sendJson(res, 500, { ok: false, error: e.message }); }
+  sendJson(res, 200, { ok: true });
+}
+
+// DELETE /api/upload-suggestions/<project> — clear all client suggestions.
+async function handleClearSuggestions(req, res, url) {
+  const parts = url.pathname.replace(/^\/api\/upload-suggestions\//, '').split('/').filter(Boolean);
+  const project = sanitizeProject(decodeURIComponent(parts[0] || ''));
+  if (!project) return sendJson(res, 400, { ok: false, error: 'project required' });
+  const dir = path.join(ROOT, 'uploads', project, CLIENT_SUGGESTIONS_DIR);
+  try { if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); }
+  catch (e) { return sendJson(res, 500, { ok: false, error: e.message }); }
+  sendJson(res, 200, { ok: true });
+}
+
 // PUT /api/upload/<project>/<relative/path/to/file>
 // Body is the raw file bytes. No multipart parsing needed.
 async function handleUpload(req, res, url) {
@@ -261,14 +494,46 @@ async function handleReview(req, res) {
     });
   }
 
+  // Load Functional Design (optional) — the agent uses it to suggest the
+  // Accenture-recommended extensibility approach in parallel with the review.
+  const functionalDesign = await loadFunctionalDesign(uploadDir);
+  const fdBlock = functionalDesign
+    ? `\n\n===== FUNCTIONAL DESIGN DOCUMENT =====\n${functionalDesign}\n===== END FUNCTIONAL DESIGN =====\n\n` +
+      `PARALLEL TASK — Accenture Suggested Approach:\n` +
+      `Based ONLY on the Functional Design above (ignore the uploaded code), decide the best\n` +
+      `S/4HANA Cloud extensibility approach. Pick EXACTLY ONE value from this set:\n` +
+      `  KEY_USER, DEVELOPER, SIDE_BY_SIDE, KU_DEV, KU_SXS, DEV_SXS, KU_DEV_SXS, FIT_TO_STANDARD\n` +
+      `Follow the ladder: fit_to_standard < key_user < developer < side_by_side. Stop at the\n` +
+      `first rung that delivers the capability. No ratings, no explanation, no color codes.\n` +
+      `Write it into the findings JSON as a top-level field:  "suggestedApproach": "<VALUE>".\n` +
+      `This runs IN PARALLEL with the code scan — do both, write both into the same JSON file.\n`
+    : '';
+
+  // Load any client-provided suggestions and inline them into the prompt.
+  const clientSuggestions = await loadClientSuggestions(uploadDir);
+  const suggestionsBlock = clientSuggestions
+    ? `\n\n===== CLIENT SUGGESTIONS (PRIORITY OVERRIDES) =====\n` +
+      `The following rules were supplied by the client and OVERRIDE the baseline checks\n` +
+      `for the sections/items they cover. For any check they address (project naming,\n` +
+      `auth, deprecated APIs, i18n, specific files/categories, naming, etc.), skip the\n` +
+      `baseline rule for that scope and emit findings based on the client rule instead.\n` +
+      `Mark every such finding with "source": "client". Baseline findings use\n` +
+      `"source": "baseline" (or omit the field). Baseline keeps running for every area\n` +
+      `the client did not mention.\n\n` +
+      clientSuggestions +
+      `\n===== END CLIENT SUGGESTIONS =====\n`
+    : '';
+
   // Build a self-contained prompt: agent instructions + the specific task.
   // Running the checks inline (rather than dispatching to a subagent) is far
   // more reliable in `-p` headless mode.
   const prompt =
     `You are running as the sap-code-reviewer for project "${project}".\n` +
     `Follow these instructions exactly:\n\n` +
-    `----- BEGIN AGENT INSTRUCTIONS -----\n${agentBody}\n----- END AGENT INSTRUCTIONS -----\n\n` +
-    `Concrete task:\n` +
+    `----- BEGIN AGENT INSTRUCTIONS -----\n${agentBody}\n----- END AGENT INSTRUCTIONS -----\n` +
+    fdBlock +
+    suggestionsBlock +
+    `\nConcrete task:\n` +
     `  * Project name: ${project}\n` +
     `  * Source folder: uploads/${project}/ (relative to the current working directory)\n` +
     `  * Output JSON file: reports/${project}-findings.json\n` +
@@ -276,7 +541,9 @@ async function handleReview(req, res) {
     `  * Do NOT modify any file under uploads/. Read-only review.\n` +
     `  * Do NOT ask clarifying questions — proceed with sensible defaults.\n` +
     `  * When done, print ONLY the concise summary described in the final step of the agent instructions.\n` +
-    `  * WRITE the JSON file before printing the summary.\n`;
+    `  * WRITE the JSON file before printing the summary.\n` +
+    (clientSuggestions ? `  * Honor the CLIENT SUGGESTIONS block above — set "source": "client" on affected findings.\n` : '') +
+    (functionalDesign ? `  * Also emit top-level "suggestedApproach" per the Functional Design task above.\n` : '');
 
   const findingsPath = path.join(ROOT, 'reports', `${project}-findings.json`);
   const preMtime = fs.existsSync(findingsPath) ? fs.statSync(findingsPath).mtimeMs : 0;
@@ -461,7 +728,7 @@ function handleStatus(req, res, url) {
 const server = http.createServer(async (req, res) => {
   // CORS for local development / other origins.
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
 
@@ -478,6 +745,18 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'PUT' && url.pathname.startsWith('/api/upload/')) {
     return handleUpload(req, res, url);
+  }
+  if (req.method === 'PUT' && url.pathname.startsWith('/api/upload-suggestions/')) {
+    return handleUploadSuggestions(req, res, url);
+  }
+  if (req.method === 'DELETE' && url.pathname.startsWith('/api/upload-suggestions/')) {
+    return handleClearSuggestions(req, res, url);
+  }
+  if (req.method === 'PUT' && url.pathname.startsWith('/api/upload-fd/')) {
+    return handleUploadFd(req, res, url);
+  }
+  if (req.method === 'DELETE' && url.pathname.startsWith('/api/upload-fd/')) {
+    return handleClearFd(req, res, url);
   }
   if (req.method === 'POST' && url.pathname === '/api/reset') {
     return handleReset(req, res);

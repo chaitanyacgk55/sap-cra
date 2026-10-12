@@ -1,0 +1,9 @@
+EXIT 1  timedOut=false
+
+--- STDOUT ---
+
+
+--- STDERR ---
+Your organization requires remote managed settings to load, but they could not be loaded. Run `claude auth login` to re-authenticate, check your network connection, or contact your administrator.
+The process tried to write to a nonexistent pipe.
+
