@@ -187,11 +187,12 @@
   <div class="card">
     <h3><span class="num">1b</span> Client suggestions <span style="color:#6b7280;font-weight:400;font-size:12px">(optional)</span></h3>
     <p style="color:#9ca3af;font-size:13px;margin-bottom:12px">
-      Upload a <code>.txt</code>, <code>.md</code>, <code>.csv</code> or <code>.xlsx</code> file with
-      client-specific review rules (project naming, auth policies, allowed/forbidden APIs, etc.).
-      These rules <strong style="color:#a78bfa">take priority over the baseline review</strong> for
-      the sections they cover — findings sourced from them are highlighted with a different color
-      in the Excel &amp; PDF reports. Baseline stays unchanged for everything else.
+      Upload a <strong><code>.txt</code> or <code>.xlsx</code></strong> file with client-specific
+      review rules (project naming, auth policies, allowed/forbidden APIs, etc.). Only these two
+      formats are accepted. These rules
+      <strong style="color:#a78bfa">take priority over the baseline review</strong> for the
+      sections they cover — findings sourced from them are highlighted with a different color in
+      the Excel &amp; PDF reports. Baseline stays unchanged for everything else.
     </p>
     <div class="btn-row">
       <button class="btn" onclick="document.getElementById('suggestionsInput').click()">
@@ -201,7 +202,7 @@
         <i class="ti ti-trash"></i> Clear
       </button>
     </div>
-    <input type="file" id="suggestionsInput" style="display:none" accept=".txt,.md,.csv,.tsv,.log,.xlsx,.xls,.xlsm" multiple>
+    <input type="file" id="suggestionsInput" style="display:none" accept=".txt,.xlsx,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple>
     <div class="file-list" id="suggestionsList"></div>
     <div class="status-box" id="suggestionsStatus"></div>
   </div>
@@ -691,9 +692,13 @@ async function clearFiles() {
       });
     } catch {}
   }
+  // Also clear Functional Design (1a) and Client Suggestions (1b) so the
+  // whole upload surface resets together.
+  try { if (typeof clearFd === 'function') await clearFd(); } catch {}
+  try { if (typeof clearSuggestions === 'function') await clearSuggestions(); } catch {}
   resetDashboard();
   document.getElementById('reviewBtn').disabled = true;
-  setStatus('info', 'Cleared.');
+  setStatus('info', 'Cleared files, Functional Design, and client suggestions.');
 }
 
 function renderFileList() {
@@ -947,6 +952,12 @@ document.getElementById('suggestionsInput').addEventListener('change', async e =
   const list = [...e.target.files];
   e.target.value = '';
   if (!list.length) return;
+  // Hard client-side guard: suggestions accept .txt / .xlsx only.
+  const bad = list.filter(f => !/\.(txt|xlsx)$/i.test(f.name));
+  if (bad.length) {
+    setSuggestionsStatus('error', `Only .txt or .xlsx files are accepted for client suggestions. Rejected: ${bad.map(b => b.name).join(', ')}`);
+    return;
+  }
   if (location.protocol !== 'http:' && location.protocol !== 'https:') {
     setSuggestionsStatus('warn', 'Suggestions upload requires the local server. Open http://localhost:5757/ instead.');
     return;

@@ -35,6 +35,25 @@ const techs    = Array.isArray(data.technologies) && data.technologies.length
 const reviewDate = new Date(data.reviewedAt || Date.now())
   .toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
+// ── Accenture Suggested vs Followed Approach (shown on page 1) ──────────────
+const _techsLower = (data.technologies || []).map(t => String(t).toLowerCase());
+const _hasUI5  = _techsLower.some(t => t.includes('ui5') || t.includes('fiori'));
+const _hasCAP  = _techsLower.some(t => t === 'cap' || t.includes('capm'));
+const _hasRAP  = _techsLower.includes('rap');
+const _hasABAP = _techsLower.some(t => t.includes('abap'));
+function _deriveFollowed() {
+  const dev = _hasRAP || _hasABAP;
+  const sxs = _hasCAP || (_hasUI5 && !dev);
+  if (dev && sxs) return 'DEV_SXS';
+  if (dev)       return 'DEVELOPER';
+  if (sxs)       return 'SIDE_BY_SIDE';
+  return 'UNKNOWN';
+}
+const followedApproach  = (data.followedApproach  && String(data.followedApproach).toUpperCase())  || _deriveFollowed();
+const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toUpperCase()) || '';
+const approachMismatch  = Boolean(suggestedApproach) && followedApproach !== 'UNKNOWN'
+                          && suggestedApproach !== followedApproach;
+
 const outPath = path.join(ROOT, 'reports', `${rawProject}-review.pdf`);
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -132,24 +151,54 @@ doc.moveTo(M, 113).lineTo(M + 60, 113).strokeColor('#A78BFA').lineWidth(3).strok
 // Details table
 let y = 236;
 const detailRows = [
-  ['Service Name',       'SAP Code Review — Automated Analysis'],
-  ['Customer / Project', project],
-  ['Technologies',       techs],
-  ['Reviewed At',        reviewDate],
-  ['Total Issues',       String(findings.length)],
-  ['Assessment',         summary.assessment || '—'],
+  ['Service Name',                     'SAP Code Review — Automated Analysis'],
+  ['Customer / Project',               project],
+  ['Technologies',                     techs],
+  ['Accenture Suggested Approach',     suggestedApproach || '— (no Functional Design uploaded)'],
+  ['Followed Approach',                followedApproach],
+  ['Reviewed At',                      reviewDate],
+  ['Total Issues',                     String(findings.length)],
+  ['Assessment',                       summary.assessment || '—'],
 ];
+const APPROACH_LABEL_BG = '#EDE9FE';  // light purple
+const APPROACH_WARN_BG  = '#FEF3C7';  // soft amber (mismatch value cell)
+const APPROACH_WARN_FG  = '#92400E';  // amber text
 detailRows.forEach(([k, v], i) => {
   // Measure how tall the value text will be so we can size the row correctly
   const vHeight = doc.heightOfString(v, { width: TW - 190, fontSize: 10 });
   const rowH = Math.max(24, vHeight + 14);
-  doc.rect(M, y, TW, rowH).fillColor(i % 2 ? C.alt : C.white).fill();
-  doc.fontSize(10).fillColor(C.gray).font('Helvetica-Bold')
+  const isApproachRow = (k === 'Accenture Suggested Approach' || k === 'Followed Approach');
+  const bg = isApproachRow ? APPROACH_LABEL_BG : (i % 2 ? C.alt : C.white);
+  doc.rect(M, y, TW, rowH).fillColor(bg).fill();
+
+  // On mismatch, repaint only the value cell amber so the two differing
+  // values are instantly visible on page 1.
+  if (isApproachRow && approachMismatch) {
+    doc.rect(M + 175, y, TW - 175, rowH).fillColor(APPROACH_WARN_BG).fill();
+  }
+
+  doc.fontSize(10).fillColor(isApproachRow ? C.purple : C.gray).font('Helvetica-Bold')
      .text(k, M + 10, y + 7, { width: 165, lineBreak: false });
-  doc.fontSize(10).fillColor(C.dark).font('Helvetica')
+  const valueColor = (isApproachRow && approachMismatch) ? APPROACH_WARN_FG : C.dark;
+  doc.fontSize(10).fillColor(valueColor).font(isApproachRow ? 'Helvetica-Bold' : 'Helvetica')
      .text(v, M + 180, y + 7, { width: TW - 190 });
   y += rowH;
 });
+
+// Mismatch banner — stays on the cover (page 1) when there is room.
+if (approachMismatch) {
+  y += 8;
+  const bannerH = 32;
+  doc.rect(M, y, TW, bannerH).fillColor(APPROACH_WARN_BG).fill();
+  doc.rect(M, y, 5, bannerH).fillColor('#D97706').fill();
+  doc.fontSize(9).fillColor(APPROACH_WARN_FG).font('Helvetica-Bold')
+     .text('APPROACH MISMATCH', M + 14, y + 6, { width: TW - 20, lineBreak: false });
+  doc.fontSize(9).fillColor(APPROACH_WARN_FG).font('Helvetica')
+     .text(
+       `Accenture suggested "${suggestedApproach}" but the uploaded code follows "${followedApproach}".`,
+       M + 14, y + 18, { width: TW - 20, lineBreak: false });
+  y += bannerH;
+}
 
 // Severity summary boxes
 y += 22;

@@ -131,8 +131,9 @@ async function loadFunctionalDesign(uploadDir) {
 }
 
 // Read all files under uploads/<project>/.client-suggestions/ and return
-// one plain-text block the agent can read inline. Supports .txt / .md /
-// .csv as raw text; .xlsx / .xls via exceljs (if available).
+// one plain-text block the agent can read inline. Only .txt and .xlsx are
+// accepted; everything else is ignored (and should have been blocked at
+// upload time anyway).
 async function loadClientSuggestions(uploadDir) {
   const dir = path.join(uploadDir, CLIENT_SUGGESTIONS_DIR);
   if (!fs.existsSync(dir)) return '';
@@ -141,12 +142,17 @@ async function loadClientSuggestions(uploadDir) {
   const chunks = [];
   for (const e of entries) {
     if (!e.isFile()) continue;
-    const full = path.join(dir, e.name);
     const ext = path.extname(e.name).toLowerCase();
+    if (ext !== '.txt' && ext !== '.xlsx') continue;
+    const full = path.join(dir, e.name);
     try {
-      if (ext === '.txt' || ext === '.md' || ext === '.csv' || ext === '.tsv' || ext === '.log') {
+      if (ext === '.txt') {
         chunks.push(`----- FILE: ${e.name} -----\n` + fs.readFileSync(full, 'utf8').trim());
-      } else if ((ext === '.xlsx' || ext === '.xls' || ext === '.xlsm') && ExcelJS) {
+      } else if (ext === '.xlsx') {
+        if (!ExcelJS) {
+          chunks.push(`----- FILE: ${e.name} (xlsx reader unavailable — run \`npm install\`) -----`);
+          continue;
+        }
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.readFile(full);
         const sheetTexts = [];
@@ -166,8 +172,6 @@ async function loadClientSuggestions(uploadDir) {
           sheetTexts.push(lines.join('\n'));
         });
         chunks.push(`----- FILE: ${e.name} -----\n` + sheetTexts.join('\n\n'));
-      } else {
-        chunks.push(`----- FILE: ${e.name} (binary/unsupported — skipped) -----`);
       }
     } catch (err) {
       chunks.push(`----- FILE: ${e.name} (parse error: ${err.message}) -----`);
@@ -332,6 +336,7 @@ function runProcess(cmd, args, opts = {}) {
 
 // PUT /api/upload-suggestions/<project>/<filename>
 // Writes client suggestion files to uploads/<project>/.client-suggestions/.
+// Restricted to .txt / .xlsx only.
 async function handleUploadSuggestions(req, res, url) {
   const parts = url.pathname.replace(/^\/api\/upload-suggestions\//, '').split('/').filter(Boolean);
   if (parts.length < 2) return sendJson(res, 400, { ok: false, error: 'project and filename required' });
@@ -340,6 +345,9 @@ async function handleUploadSuggestions(req, res, url) {
   const filename = decodeURIComponent(parts.slice(1).join('/'));
   if (filename.includes('/') || filename.includes('\\') || filename === '.' || filename === '..') {
     return sendJson(res, 400, { ok: false, error: 'invalid filename' });
+  }
+  if (!/\.(txt|xlsx)$/i.test(filename)) {
+    return sendJson(res, 400, { ok: false, error: 'Only .txt or .xlsx files are accepted for client suggestions' });
   }
   const dir = path.join(ROOT, 'uploads', project, CLIENT_SUGGESTIONS_DIR);
   try { fs.mkdirSync(dir, { recursive: true }); }
