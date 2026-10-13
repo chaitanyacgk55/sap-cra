@@ -153,17 +153,12 @@
       <input type="text" id="projName" placeholder="my-sap-app">
       <small>Files will be saved to <code>uploads/&lt;project-name&gt;/</code>. Spaces become hyphens.</small>
     </div>
-    <div class="field">
-      <label for="clientName">Client / customer name to mask <span style="color:#6b7280;text-transform:none;letter-spacing:0">(optional)</span></label>
-      <input type="text" id="clientName" placeholder="e.g. Vistra, Vistra Holdings, ACME Corp">
-      <small>Comma-separated aliases. All occurrences are redacted as <code>[CLIENT]</code> in the PDF &amp; Excel reports (case-insensitive, whole-word). Emails, IPs and JWT tokens are always masked.</small>
-    </div>
   </div>
 
   <!-- Card 1a : Functional Design (optional — triggers approach suggestion) -->
   <div class="card">
     <h3><span class="num">1a</span> Functional Design <span style="color:#6b7280;font-weight:400;font-size:12px">(optional)</span></h3>
-    <p style="color:#9ca3af;font-size:13px;margin-bottom:12px">
+    <p style="color:#9ca3af;font-size:13px;margin-bottom:10px">
       Upload the Functional Design — <strong>only <code>.doc</code> or <code>.docx</code>
       files are accepted</strong>. The agent runs the code review and the
       <strong style="color:#a78bfa">Accenture Suggested Approach</strong> analysis
@@ -417,13 +412,18 @@ let skippedCount = 0;
 
 // Non-SAP files/folders that must never be sent to the reviewer.
 // Mirrors the ignore rules in .claude/agents/sap-code-reviewer.md.
-const SKIP_DIR_RE = /(^|\/)(\.git|\.vscode|\.idea|\.settings|\.metadata|node_modules|dist|build|out|\.build|coverage|\.nyc_output|\.vs|bin|obj|test-results|reports|screenshots|\.hana-cli|mta_archives|gen)(\/|$)/i;
-const SKIP_FILE_RE = /^(\.gitignore|\.gitattributes|\.gitkeep|\.appgeninfo\.json|appgeninfo\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|\.ds_store|thumbs\.db|launch\.json|tasks\.json|\.eslintrc.*|\.prettierrc.*|\.editorconfig|\.stylelintrc.*|\.babelrc.*|\.npmrc|\.nvmrc|\.node-version|readme.*|changelog.*|license.*|contributing.*)$/i;
-const SKIP_EXT_RE = /\.(log|tmp|bak|swp|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|pdf|jar|class|exe|dll|so|dylib)$/i;
+const SKIP_DIR_RE = /(^|\/)(\.git|\.vscode|\.idea|\.settings|\.metadata|node_modules|dist|build|out|\.build|coverage|\.nyc_output|\.vs|bin|obj|test-results|reports|screenshots|\.hana-cli|mta_archives|gen|localService|localservice|mockdata|mockserver|webapp\/css|webapp\/test|webapp\/i18n_backup)(\/|$)/i;
+const SKIP_FILE_RE = /^(\.gitignore|\.gitattributes|\.gitkeep|\.appgeninfo\.json|appgeninfo\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|\.ds_store|thumbs\.db|launch\.json|tasks\.json|\.eslintrc.*|\.prettierrc.*|\.editorconfig|\.stylelintrc.*|\.babelrc.*|\.npmrc|\.nvmrc|\.node-version|readme.*|changelog.*|license.*|contributing.*|metadata\.xml|annotations\.xml|style\.css|index\.html|flpSandbox\.html|flpSandboxMockServer\.html|.*\.qunit\.html|.*\.qunit\.js|unitTests\.qunit\.html|opaTests\.qunit\.html)$/i;
+const SKIP_EXT_RE = /\.(log|tmp|bak|swp|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|pdf|jar|class|exe|dll|so|dylib|css|scss|less|map)$/i;
+// Full-path matches (not just basename / directory) — catches things like
+// `webapp/test/unit/unitTests.qunit.html`, `webapp/localService/mockdata/*`,
+// any `metadata.xml` nested anywhere, and standard UI5 mock/test harness files.
+const SKIP_PATH_RE = /(^|\/)(webapp\/css\/|webapp\/test\/|webapp\/localService\/|webapp\/localservice\/|.*\/metadata\.xml$|.*\/annotations\.xml$|.*\.qunit\.(html|js)$|.*mockdata\/|.*mockserver\.js$)/i;
 
 function shouldSkip(relPath) {
   const rel = relPath.replace(/\\/g, '/');
   if (SKIP_DIR_RE.test(rel)) return true;
+  if (SKIP_PATH_RE.test(rel)) return true;
   const base = rel.split('/').pop() || '';
   if (SKIP_FILE_RE.test(base)) return true;
   if (SKIP_EXT_RE.test(base)) return true;
@@ -770,6 +770,31 @@ async function autoUpload() {
       } catch {}
       resetForProject = clean;
       uploaded.clear(); // any earlier "uploaded" markers are now invalid
+
+      // Belt-and-braces: on older server builds the reset wiped the FD /
+      // client-suggestion sidecar folders along with the code folder. Re-push
+      // whatever the user already picked for Card 1a / 1b so the sidecars
+      // survive the reset regardless of the server version in memory.
+      if (typeof fdFiles !== 'undefined' && fdFiles.size > 0) {
+        for (const [name, f] of fdFiles) {
+          try {
+            await fetch(base + '/api/upload-fd/' + encodeURIComponent(clean) + '/' + encodeURIComponent(name), {
+              method: 'PUT', body: f,
+            });
+          } catch (err) { console.warn('[reset] FD re-upload failed:', name, err.message); }
+        }
+        console.log('[reset] re-uploaded', fdFiles.size, 'FD file(s)');
+      }
+      if (typeof suggestionsFiles !== 'undefined' && suggestionsFiles.size > 0) {
+        for (const [name, f] of suggestionsFiles) {
+          try {
+            await fetch(base + '/api/upload-suggestions/' + encodeURIComponent(clean) + '/' + encodeURIComponent(name), {
+              method: 'PUT', body: f,
+            });
+          } catch (err) { console.warn('[reset] suggestions re-upload failed:', name, err.message); }
+        }
+        console.log('[reset] re-uploaded', suggestionsFiles.size, 'client-suggestion file(s)');
+      }
     } catch {
       // non-fatal — proceed and let uploads overwrite
     }
@@ -1189,8 +1214,15 @@ async function startReview() {
   const btn = document.getElementById('reviewBtn');
   const pdfLink  = document.getElementById('downloadPdfBtn');
   const xlsxLink = document.getElementById('downloadXlsxBtn');
-  pdfLink.style.display  = 'none';
-  xlsxLink.style.display = 'none';
+  // Hard-hide the download buttons AND strip hrefs so they can't be clicked
+  // even if some stale layout keeps them visible for a moment.
+  [pdfLink, xlsxLink].forEach(el => {
+    el.style.display = 'none';
+    el.removeAttribute('href');
+    el.setAttribute('aria-disabled', 'true');
+    el.style.pointerEvents = 'none';
+    el.style.opacity = '0.5';
+  });
   document.getElementById('findingsSummary').style.display = 'none';
 
   btn.disabled = true;
@@ -1213,23 +1245,28 @@ async function startReview() {
         pdfLink.href = base + j.pdfUrl;
         pdfLink.setAttribute('download', '');
         pdfLink.style.display = 'inline-flex';
+        pdfLink.removeAttribute('aria-disabled');
+        pdfLink.style.pointerEvents = '';
+        pdfLink.style.opacity = '';
         setProgressStage('PDF ready — generating Excel');
       }
       if (j.xlsxUrl && xlsxLink.style.display === 'none') {
         xlsxLink.href = base + j.xlsxUrl;
         xlsxLink.setAttribute('download', '');
         xlsxLink.style.display = 'inline-flex';
+        xlsxLink.removeAttribute('aria-disabled');
+        xlsxLink.style.pointerEvents = '';
+        xlsxLink.style.opacity = '';
         setReviewStatus('success', 'PDF and Excel reports are ready. Click to download.');
       }
     } catch {}
   }, 3000);
 
   try {
-    const client = (document.getElementById('clientName').value || '').trim();
     const res = await fetch(base + '/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: clean, client }),
+      body: JSON.stringify({ project: clean }),
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
@@ -1252,10 +1289,29 @@ async function startReview() {
     const cachedNote = data.cached
       ? ` (cached — upload unchanged since last review; hash ${data.sourceHash || '—'})`
       : '';
-    setReviewStatus('success',
+    const APPROACH_FULL_NAME = {
+      customisation:'Customisation (Standard Configuration)',
+      keyuser:'Key User Extensibility',
+      developer:'Developer Extensibility (ABAP Cloud / RAP)',
+      sidebyside:'Side-by-Side Extensibility (SAP BTP)',
+      inapp_btp:'Developer + BTP Mixed',
+      keyuser_inapp:'Key User + Developer Mixed',
+      unknown:'Unknown',
+    };
+    const approachLabel = c => c ? (APPROACH_FULL_NAME[String(c).toLowerCase().replace(/[^a-z_]/g,'')] || c) : '';
+    const fdNote = (data.functionalDesignFiles > 0)
+      ? ` · FD files read: ${data.functionalDesignFiles} → Suggested approach: ${data.suggestedApproach ? approachLabel(data.suggestedApproach) : '— (agent did not emit one)'}`
+      : (fdFiles.size > 0
+          ? ' · WARNING: you picked an FD file but the server found 0 — restart `node scripts/server.js` so the handleReset fix is in effect, then try again.'
+          : '');
+    const csNote = (data.clientSuggestionsFiles > 0)
+      ? ` · Client suggestions read: ${data.clientSuggestionsFiles}`
+      : '';
+    setReviewStatus(
+      (data.functionalDesignFiles === 0 && fdFiles.size > 0) ? 'warn' : 'success',
       `Done. ${total} finding(s) across ${techs}${cachedNote}. ` +
       `High: ${s.high || 0} · Medium: ${s.medium || 0} · Low: ${s.low || 0}. ` +
-      (s.assessment ? 'Assessment: ' + s.assessment : ''));
+      (s.assessment ? 'Assessment: ' + s.assessment : '') + fdNote + csNote);
 
     document.getElementById('countTotal').textContent  = total;
     document.getElementById('countHigh').textContent   = s.high   || 0;
@@ -1277,11 +1333,17 @@ async function startReview() {
       pdfLink.href = base + data.pdfUrl;
       pdfLink.setAttribute('download', '');
       pdfLink.style.display = 'inline-flex';
+      pdfLink.removeAttribute('aria-disabled');
+      pdfLink.style.pointerEvents = '';
+      pdfLink.style.opacity = '';
     }
     if (data.xlsxUrl) {
       xlsxLink.href = base + data.xlsxUrl;
       xlsxLink.setAttribute('download', '');
       xlsxLink.style.display = 'inline-flex';
+      xlsxLink.removeAttribute('aria-disabled');
+      xlsxLink.style.pointerEvents = '';
+      xlsxLink.style.opacity = '';
     }
   } catch (e) {
     setReviewStatus('error',

@@ -45,6 +45,7 @@ const COLUMNS = [
   { key: 'severityRationale', header: 'Severity Rationale', width: 46 },
   { key: 'blocksTransport',header: 'Blocks Transport', width: 8 },
   { key: 'source',         header: 'Source',           width: 10 },
+  { key: 'clientNote',     header: 'Client Instruction', width: 50 },
   { key: 'technology',     header: 'Technology',       width: 14 },
   { key: 'layer',          header: 'Layer',            width: 10 },
   { key: 'category',       header: 'Category',         width: 14 },
@@ -62,6 +63,23 @@ const COLUMNS = [
 // baseline SAP ruleset.
 const CLIENT_ROW_FILL   = 'FFBBF7D0'; // light green
 const CLIENT_SOURCE_PILL = 'FF16A34A'; // darker green badge
+
+// Approach ids match the Accenture Claude artifact exactly. Reports show
+// the full name — the raw id ("inapp_btp" etc.) is unreadable for a human.
+const APPROACH_FULL_NAME = {
+  customisation:  'Customisation (Standard Configuration)',
+  keyuser:        'Key User Extensibility',
+  developer:      'Developer Extensibility (ABAP Cloud / RAP)',
+  sidebyside:     'Side-by-Side Extensibility (SAP BTP)',
+  inapp_btp:      'Developer + BTP Mixed',
+  keyuser_inapp:  'Key User + Developer Mixed',
+  unknown:        'Unknown',
+};
+function approachLabel(code) {
+  if (!code) return '';
+  const key = String(code).toLowerCase().replace(/[^a-z_]/g, '');
+  return APPROACH_FULL_NAME[key] || code;
+}
 
 const SEVERITY_COLORS = {
   High:   'FFFB7185',
@@ -90,6 +108,7 @@ function addFindingsSheet(workbook, name, list) {
       severityRationale: f.severityRationale ?? '',
       blocksTransport: f.blocksTransport === true ? 'YES' : '',
       source:          isClient ? 'Client' : 'Baseline',
+      clientNote:      isClient ? (f.clientNote ?? '') : '',
       technology:      f.technology ?? '',
       layer:           f.layer ?? '',
       category:        f.category ?? '',
@@ -145,24 +164,24 @@ async function main() {
   const clientCount = findings.filter(f => (f.source || '').toLowerCase() === 'client').length;
   const baselineCount = findings.length - clientCount;
 
-  // Derive the "Followed approach" from the detected technologies — the
-  // extensibility rung the code actually uses.
-  const techs = (data.technologies ?? []).map(t => String(t).toLowerCase());
-  const hasUI5  = techs.some(t => t.includes('ui5') || t.includes('fiori'));
-  const hasCAP  = techs.some(t => t === 'cap' || t.includes('capm'));
-  const hasRAP  = techs.includes('rap');
-  const hasABAP = techs.some(t => t.includes('abap'));
+  // Derive the "Followed approach" from the detected technologies, using
+  // the artifact's six-id vocabulary.
+  const techsLower = (data.technologies ?? []).map(t => String(t).toLowerCase());
+  const hasUI5  = techsLower.some(t => t.includes('ui5') || t.includes('fiori'));
+  const hasCAP  = techsLower.some(t => t === 'cap' || t.includes('capm'));
+  const hasRAP  = techsLower.includes('rap');
+  const hasABAP = techsLower.some(t => t.includes('abap'));
   function deriveFollowed() {
     const dev = hasRAP || hasABAP;
     const sxs = hasCAP || (hasUI5 && !dev); // UI5 alone → BTP side-by-side
-    if (dev && sxs) return 'DEV_SXS';
-    if (dev)       return 'DEVELOPER';
-    if (sxs)       return 'SIDE_BY_SIDE';
-    return 'UNKNOWN';
+    if (dev && sxs) return 'inapp_btp';
+    if (dev)       return 'developer';
+    if (sxs)       return 'sidebyside';
+    return 'unknown';
   }
-  const followedApproach  = (data.followedApproach  && String(data.followedApproach).toUpperCase())  || deriveFollowed();
-  const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toUpperCase()) || '';
-  const approachMismatch  = suggestedApproach && followedApproach !== 'UNKNOWN'
+  const followedApproach  = (data.followedApproach  && String(data.followedApproach).toLowerCase())  || deriveFollowed();
+  const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toLowerCase()) || '';
+  const approachMismatch  = suggestedApproach && followedApproach !== 'unknown'
                             && suggestedApproach !== followedApproach;
 
   const rows = [
@@ -171,8 +190,8 @@ async function main() {
     ['Reviewed at',   data.reviewedAt  ?? new Date().toISOString()],
     ['Technologies',  (data.technologies ?? []).join(', ')],
     [],
-    ['Accenture Suggested Approach', suggestedApproach || '— (no Functional Design uploaded)'],
-    ['Followed Approach',            followedApproach],
+    ['Accenture Suggested Approach', suggestedApproach ? approachLabel(suggestedApproach) : '— (no Functional Design uploaded)'],
+    ['Followed Approach',            approachLabel(followedApproach)],
     [],
     ['Severity',      'Count'],
     ['High',          high],
@@ -206,7 +225,7 @@ async function main() {
     summary.addRow([]);
     const warnRow = summary.addRow([
       'APPROACH MISMATCH',
-      `Accenture suggested "${suggestedApproach}" but the uploaded code follows "${followedApproach}".`,
+      `Accenture suggested "${approachLabel(suggestedApproach)}" but the uploaded code follows "${approachLabel(followedApproach)}".`,
     ]);
     warnRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: APPROACH_MISMATCH } };
     warnRow.getCell(1).font = { bold: true, color: { argb: 'FF1F2937' } };

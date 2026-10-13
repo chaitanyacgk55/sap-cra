@@ -1,8 +1,0 @@
-EXIT 1  timedOut=false
-
---- STDOUT ---
-Failed to authenticate: OAuth session expired and could not be refreshed
-
-
---- STDERR ---
-

@@ -44,15 +44,30 @@ const _hasABAP = _techsLower.some(t => t.includes('abap'));
 function _deriveFollowed() {
   const dev = _hasRAP || _hasABAP;
   const sxs = _hasCAP || (_hasUI5 && !dev);
-  if (dev && sxs) return 'DEV_SXS';
-  if (dev)       return 'DEVELOPER';
-  if (sxs)       return 'SIDE_BY_SIDE';
-  return 'UNKNOWN';
+  if (dev && sxs) return 'inapp_btp';
+  if (dev)       return 'developer';
+  if (sxs)       return 'sidebyside';
+  return 'unknown';
 }
-const followedApproach  = (data.followedApproach  && String(data.followedApproach).toUpperCase())  || _deriveFollowed();
-const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toUpperCase()) || '';
-const approachMismatch  = Boolean(suggestedApproach) && followedApproach !== 'UNKNOWN'
+const followedApproach  = (data.followedApproach  && String(data.followedApproach).toLowerCase())  || _deriveFollowed();
+const suggestedApproach = (data.suggestedApproach && String(data.suggestedApproach).toLowerCase()) || '';
+const approachMismatch  = Boolean(suggestedApproach) && followedApproach !== 'unknown'
                           && suggestedApproach !== followedApproach;
+
+const APPROACH_FULL_NAME = {
+  customisation:  'Customisation (Standard Configuration)',
+  keyuser:        'Key User Extensibility',
+  developer:      'Developer Extensibility (ABAP Cloud / RAP)',
+  sidebyside:     'Side-by-Side Extensibility (SAP BTP)',
+  inapp_btp:      'Developer + BTP Mixed',
+  keyuser_inapp:  'Key User + Developer Mixed',
+  unknown:        'Unknown',
+};
+function approachLabel(code) {
+  if (!code) return '';
+  const key = String(code).toLowerCase().replace(/[^a-z_]/g, '');
+  return APPROACH_FULL_NAME[key] || code;
+}
 
 const outPath = path.join(ROOT, 'reports', `${rawProject}-review.pdf`);
 
@@ -74,6 +89,11 @@ const C = {
   codeBg:     '#1E1535',
   codeText:   '#86EFAC',
 };
+
+// Client-sourced finding highlight colours — defined here so every page
+// (cover, summary, snapshot table, detailed issues) can reference them.
+const CLIENT_BG  = '#DCFCE7';   // light green row background
+const CLIENT_BAR = '#16A34A';   // darker green badge / accent
 
 function sevColor(s) { return s === 'High' ? C.high : s === 'Medium' ? C.med : C.low; }
 function sevBg(s)    { return s === 'High' ? C.highBg : s === 'Medium' ? C.medBg : C.lowBg; }
@@ -148,16 +168,22 @@ doc.fontSize(26).fillColor(C.white).font('Helvetica-Bold')
    .text('SAP Code Review Report', M, 74, { width: TW });
 doc.moveTo(M, 113).lineTo(M + 60, 113).strokeColor('#A78BFA').lineWidth(3).stroke();
 
-// Details table
+// Details table — counts of baseline vs client-sourced findings so the
+// reader sees up-front which rows in the body were annotated with a
+// client suggestion.
+const _clientCount   = findings.filter(f => (f.source || '').toLowerCase() === 'client').length;
+const _baselineCount = findings.length - _clientCount;
+
 let y = 236;
 const detailRows = [
   ['Service Name',                     'SAP Code Review — Automated Analysis'],
   ['Customer / Project',               project],
   ['Technologies',                     techs],
-  ['Accenture Suggested Approach',     suggestedApproach || '— (no Functional Design uploaded)'],
-  ['Followed Approach',                followedApproach],
+  ['Accenture Suggested Approach',     suggestedApproach ? approachLabel(suggestedApproach) : '— (no Functional Design uploaded)'],
+  ['Followed Approach',                approachLabel(followedApproach)],
   ['Reviewed At',                      reviewDate],
   ['Total Issues',                     String(findings.length)],
+  ['Baseline / Client Sourced',        `${_baselineCount} baseline · ${_clientCount} client-sourced`],
   ['Assessment',                       summary.assessment || '—'],
 ];
 const APPROACH_LABEL_BG = '#EDE9FE';  // light purple
@@ -195,7 +221,7 @@ if (approachMismatch) {
      .text('APPROACH MISMATCH', M + 14, y + 6, { width: TW - 20, lineBreak: false });
   doc.fontSize(9).fillColor(APPROACH_WARN_FG).font('Helvetica')
      .text(
-       `Accenture suggested "${suggestedApproach}" but the uploaded code follows "${followedApproach}".`,
+       `Accenture suggested "${approachLabel(suggestedApproach)}" but the uploaded code follows "${approachLabel(followedApproach)}".`,
        M + 14, y + 18, { width: TW - 20, lineBreak: false });
   y += bannerH;
 }
@@ -264,7 +290,20 @@ doc.fontSize(10).fillColor(C.dark).font('Helvetica')
      `(${summary.high || 0} High, ${summary.medium || 0} Medium and ${summary.low || 0} Low) ` +
      `were found.${summary.assessment ? '  Assessment: ' + summary.assessment : ''}`,
      M, y, { width: TW });
-y = doc.y + 18;
+y = doc.y + 8;
+// Call out how many findings were annotated with a specific client
+// instruction, so a reader skimming the summary knows at a glance that
+// the client's own rules were applied on top of the baseline review.
+if (_clientCount > 0) {
+  doc.fontSize(10).fillColor(CLIENT_BAR).font('Helvetica-Bold')
+     .text(
+       `${_clientCount} finding${_clientCount !== 1 ? 's are' : ' is'} annotated with a client instruction ` +
+       `(highlighted in green in the detailed section; see the "Client Instruction" column of the Excel ` +
+       `report for the exact rule).`,
+       M, y, { width: TW });
+  y = doc.y + 10;
+}
+y = y + 8;
 
 // ── Snapshot table ─────────────────────────────────────────────────────────────
 y = subTitle('Snapshot of Issues', y);
@@ -284,8 +323,6 @@ function drawSnapshotHeader(y) {
 
 y = drawSnapshotHeader(y);
 
-const CLIENT_BG = '#DCFCE7';   // light green row background for client-sourced findings
-const CLIENT_BAR = '#16A34A';  // badge / banner color for client-sourced findings
 const isClientSrc = (f) => (f && typeof f.source === 'string' && f.source.toLowerCase() === 'client');
 
 findings.forEach((f, idx) => {
@@ -338,13 +375,21 @@ for (const [tech, items] of Object.entries(groups)) {
        .text(issLabel, M + 8, y + 7, { width: TW - 16, lineBreak: false });
     y += 22 + 7;
 
-    // ── Client rule badge ───────────────────────────────────────────────────
+    // ── Client rule badge + client instruction ──────────────────────────────
     if (isClientSrc(f)) {
       y = checkY(y, 20);
       doc.rect(M, y, TW, 16).fillColor(CLIENT_BAR).fill();
       doc.fontSize(9).fillColor(C.white).font('Helvetica-Bold')
-         .text('CLIENT RULE — overrides baseline check for this item', M + 8, y + 4, { width: TW - 16, lineBreak: false });
+         .text('CLIENT-SOURCED FINDING — annotated per client suggestion', M + 8, y + 4, { width: TW - 16, lineBreak: false });
       y += 16 + 4;
+      if (f.clientNote) {
+        y = checkY(y, 24);
+        doc.fontSize(9).fillColor(CLIENT_BAR).font('Helvetica-Bold').text('Client instruction:', M, y);
+        y = doc.y + 3;
+        doc.fontSize(9).fillColor(C.dark).font('Helvetica-Oblique')
+           .text(String(f.clientNote), M + 12, y, { width: TW - 12 });
+        y = doc.y + 8;
+      }
     }
 
     // ── Priority + file ─────────────────────────────────────────────────────

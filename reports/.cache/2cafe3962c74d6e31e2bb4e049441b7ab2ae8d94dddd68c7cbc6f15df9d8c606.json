@@ -1,0 +1,702 @@
+{
+  "project": "sap-app-20261013-163123",
+  "reviewedAt": "2026-10-13T16:35:00Z",
+  "technologies": [
+    "SAPUI5"
+  ],
+  "findings": [
+    {
+      "id": 1,
+      "severity": "High",
+      "layer": "approuter",
+      "technology": "SAPUI5",
+      "file": "xs-app.json",
+      "line": 10,
+      "category": "security",
+      "title": "CSRF protection disabled on write-capable backend routes",
+      "issue": "Two routes that proxy state-changing requests to backends have csrfProtection: false — the CatalogService route (/odata/v4/CatalogService) and the catch-all S/4HANA route (/sap/*). This disables the approuter's enforcement of X-CSRF-Token on POST/PATCH/DELETE and leaves the app open to cross-site request forgery.",
+      "severityRationale": "Both routes authenticate via xsuaa and are used by the controller to invoke POST actions (AcquireLock, ReleaseLock, HeartbeatLock) and to PATCH/POST A_PurchaseContract. Turning csrfProtection off is a real CSRF path against authenticated users.",
+      "recommendation": "Remove the csrfProtection: false flag (default is true) on both the CatalogService and /sap/* routes. The UI5 ODataModel and the manual $.ajax calls already fetch an X-CSRF-Token, so re-enabling CSRF will not break the client flow.",
+      "codeSnippet": "\"source\": \"^/odata/v4/CatalogService(/.*)?$\",\n\"destination\": \"proc-db\",\n\"authenticationType\": \"xsuaa\",\n\"csrfProtection\": false",
+      "referenceLink": "https://help.sap.com/docs/btp/sap-business-technology-platform/application-router",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "xs-app.json",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "severity": "Medium",
+      "layer": "approuter",
+      "technology": "SAPUI5",
+      "file": "xs-security.json",
+      "line": 4,
+      "category": "security",
+      "title": "No scopes or role-templates defined — authorization is coarse-grained",
+      "issue": "scopes and role-templates are both empty arrays. The app relies solely on xsuaa authentication without any fine-grained role check, so any authenticated user has full access to every route and OData action (AcquireLock, ReleaseLock, PATCH on A_PurchaseContract).",
+      "severityRationale": "Business function is purchasing-contract modification; without role gating, authenticated users across the tenant can edit any contract they can reach. Not an immediate exploit but a clear least-privilege gap.",
+      "recommendation": "Define scopes such as 'Display' and 'Edit' and bind role-templates. Reference them via @restrict/@requires on the CAP CatalogService actions and from inbounds in manifest.json (role-based cross-navigation).",
+      "codeSnippet": "\"scopes\": [],\n\"role-templates\": []",
+      "referenceLink": "https://help.sap.com/docs/btp/sap-business-technology-platform/role-templates",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 3,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 243,
+      "category": "deprecated-api",
+      "title": "Deprecated factory sap.ui.xmlfragment() used for dialog instantiation",
+      "issue": "sap.ui.xmlfragment() is a synchronous factory marked deprecated since UI5 1.56. It is used twice to create the Create Child Contract dialog — once eagerly in _onRouteMatched (line 243) and again on demand in onCreateChild (line 853).",
+      "severityRationale": "The deprecated API still works but blocks the rendering thread and will be removed. Replacement is well-defined and non-breaking.",
+      "recommendation": "Switch to the async Fragment.load({ id, name, controller }) pattern already used elsewhere in the controller (see onPlantValueHelpRequest at line 366). Return the resolved dialog via a cached promise.",
+      "codeSnippet": "this._oCreateChildDialog = sap.ui.xmlfragment(\n  \"createChildDialog\",\n  \"proc-contractmgmt-fe.view.createChild\",\n  this\n);",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/sap.ui.core.Fragment%23methods/sap.ui.core.Fragment.load",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 853
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 1373,
+      "category": "deprecated-api",
+      "title": "Deprecated sap.ui.getCore().applyChanges() called before save",
+      "issue": "sap.ui.getCore() is deprecated as of UI5 1.118. Calling applyChanges() on the Core to force a synchronous rendering pass is the discouraged pattern.",
+      "severityRationale": "Both the function and the use case are discouraged; relying on sync-render before an OData PATCH can mask propagation bugs that break when the API is finally removed.",
+      "recommendation": "Remove the applyChanges() call and bind through two-way bindings so change events are already propagated. If a flush is required, await Promise.resolve() between the change handler and the save instead.",
+      "codeSnippet": "_saveChildAfterValidation: function () {\n  sap.ui.getCore().applyChanges();",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/sap.ui/methods/sap.ui.getCore",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 5,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 107,
+      "category": "lifecycle",
+      "title": "No onExit() — intervals, timers, and router listeners leak",
+      "issue": "The controller allocates two setInterval handles (_iLockPollInterval, _iHeartbeatInterval), a setTimeout (_iTargetBusyTimer), registers window.onbeforeunload, and attaches router listeners, but never implements onExit(). When the view is destroyed (navigation away, FLP tile switch, personalisation reload), the intervals and the global onbeforeunload keep firing against a detached controller.",
+      "severityRationale": "Causes real memory and network leaks (polling LockStatus every 30 s against a disposed view) and can trigger errors because this.getView() returns a destroyed view inside the interval callback.",
+      "recommendation": "Add onExit() that calls this._stopLockPolling(), this._stopHeartbeat(), clearTimeout(this._iTargetBusyTimer), nulls window.onbeforeunload if it still points at the handler, and detaches the routeMatched listener registered in _onRouteMatched.",
+      "codeSnippet": "onInit: function () { ... this._iLockPollInterval = null; this._iHeartbeatInterval = null; ... }\n// no onExit anywhere in this file",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/121b8e6337d147af9819129e428f1f75",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 6,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 311,
+      "category": "correctness",
+      "title": "oRouter.attachRouteMatched re-registered on every pattern match",
+      "issue": "Inside _onRouteMatched (which fires every time this route is matched) the controller calls oRouter.attachRouteMatched(...). Each navigation back to this route stacks another listener; after N visits the handler runs N times per route change — releasing locks and restoring backups N times.",
+      "severityRationale": "Each visit the stack grows unbounded. The handler releases locks and resets edit mode; multiple invocations can race with user actions and release a lock the user just acquired.",
+      "recommendation": "Attach the global routeMatched listener once in onInit (or move the auto-exit logic into onExit / a Component-level nav handler). Store the handler reference so detachRouteMatched can be called in onExit.",
+      "codeSnippet": "oRouter.attachRouteMatched(function (oEvent) {\n  if (oEvent.getParameter(\"name\") !== \"childContractRoute\") { ... this._releaseLock(...) ... }\n}.bind(this));",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/sap.ui.core.routing.Router%23events/routeMatched",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 7,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 1034,
+      "category": "best-practice",
+      "title": "Direct $.ajax used for OData writes instead of ODataModel.create/update",
+      "issue": "The POST that creates the child contract and the PATCH that updates it use jQuery.ajax directly against oModel.sServiceUrl, bypassing the UI5 ODataModel API. The same anti-pattern appears in all four lock calls (AcquireLock, ReleaseLock, HeartbeatLock, LockStatus GET).",
+      "severityRationale": "Bypasses UI5 batch, change-set, retry and model-cache logic; forces manual X-CSRF-Token handshakes (duplicated 4 times); leaks jQuery as an undeclared global ($ is not in the sap.ui.define imports).",
+      "recommendation": "Use oModel.create('/A_PurchaseContract', oPayload, {success, error}) and oModel.update(sPath, oData, {...}). For the custom bound actions on the v4 CatalogService use the v4 ODataModel.bindContext('AcquireLock(...)') pattern, which handles CSRF automatically.",
+      "codeSnippet": "var sUrl = sServiceUrl + \"/A_PurchaseContract\";\nvar csrfToken = oModel.getSecurityToken();\n$.ajax({ url: sUrl, method: \"POST\", ... });",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/6c47b2b39db9404582994070ec3d57a2",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1411
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1650
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1699
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1772
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1829
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 557,
+      "category": "performance",
+      "title": "N+1 OData read pattern — one PurchaseOrder bindList per child row",
+      "issue": "_computeChildOrderedAndResidual issues a separate bindList against /PurchaseOrder with $filter=PurchaseContract eq '<child>' for every context in the children table. _fetchPlantsForChildren (line 1540) does the same thing for plant lookup — one oModel.read per child. onCheckChild (line 1175) repeats the pattern during validation.",
+      "severityRationale": "For a parent with M children, three distinct N+1 fan-outs run (ordered calc, plant fetch, validation). Latency scales linearly with children; on a 50-row page that is 150 round-trips.",
+      "recommendation": "Collect child contract keys and issue a single bindList with $filter=PurchaseContract in (...) (or build an OR filter group), then dispatch into oCalcModel/oLocalModel by key. For plant, add Plant to the $select of the initial child-contract read instead of re-reading one by one.",
+      "codeSnippet": "aChildContexts.forEach(function (oCtx) {\n  this._computeChildOrderedAndResidual(oCtx, oPOModel);\n}, this);",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/d1b74e5ca2f74f7497d12d3a0a2ca12a",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1175
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1540
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/view/contractList.view.xml",
+      "line": 101,
+      "category": "performance",
+      "title": "Unbounded initial OData read — table has no growing / threshold",
+      "issue": "sap.m.Table 'purchaseContractTable' binds items=\"{purchasecontract>/A_PurchaseContract}\" with no growing=\"true\" / growingThreshold / $top. The controller's onInit re-binds via oTable.bindItems({...}) also without a length limit. ODataModel v2 default page size will be applied, but the client has no explicit cap and no lazy loading. The childContractTable in childcontractList.view.xml has the same shape.",
+      "severityRationale": "Agent instructions require initial list loads to be bounded (50–100) and preferably lazy via growing=\"true\". Current markup is eager and unbounded in the explicit sense.",
+      "recommendation": "Add growing=\"true\" growingThreshold=\"50\" growingScrollToLoad=\"true\" to both Tables, and move the view-level filter to the XML binding so onInit does not have to re-bind.",
+      "codeSnippet": "<Table id=\"purchaseContractTable\" inset=\"false\" mode=\"None\" items=\"{purchasecontract>/A_PurchaseContract}\">",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/sap.m.ListBase/controlProperties",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/view/childcontractList.view.xml",
+          "line": 90
+        },
+        {
+          "file": "webapp/controller/contractList.controller.js",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 468,
+      "category": "i18n",
+      "title": "Hardcoded dialog titles 'Error' and 'Success' instead of i18n keys",
+      "issue": "Every MessageBox call sets title: \"Error\" or title: \"Success\" as a literal string. The user-facing text is not routed through the resource bundle, so the Italian i18n_it.properties cannot translate it.",
+      "severityRationale": "The project has an it locale bundle and shows mixed-language dialogs today — this is a translation defect, not just a style issue.",
+      "recommendation": "Replace every literal title with msgBundle.getText('errorTitle') / 'successTitle' and add the keys to both i18n.properties and i18n_it.properties.",
+      "codeSnippet": "MessageBox.error(oBundle.getText(\"modelPurchaseOrderNotFound\"), {\n  title: \"Error\",\n  actions: [MessageBox.Action.OK]\n});",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/91f0bd316f4d1014b6dd926db0e91070",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 721
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 800
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 931
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1075
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1128
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1140
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1297
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1388
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1448
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1468
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "severity": "Medium",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/view/createChild.fragment.xml",
+      "line": 39,
+      "category": "i18n",
+      "title": "Hardcoded placeholder text in fragment inputs",
+      "issue": "placeholder=\"<= Residual value\", placeholder=\"Max 2 characters\", placeholder=\"Max 20 characters\", placeholder=\"Plant\" are inlined in XML instead of bound through {i18n>...}. The keys sapCodePlaceholder, internalCodePlaceholder, plantPlaceholder, childTargetPlaceholder already exist in i18n.properties but are not referenced.",
+      "severityRationale": "i18n keys exist but are unused — Italian users see English placeholders in every input of the create-child dialog.",
+      "recommendation": "Replace each literal placeholder with placeholder=\"{i18n>childTargetPlaceholder}\" / sapCodePlaceholder / internalCodePlaceholder / plantPlaceholder.",
+      "codeSnippet": "<Input id=\"sapCodeInput\" maxLength=\"2\" value=\"{childContract>/SAPCode}\" placeholder=\"Max 2 characters\" />",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/eba8d25a31ef416ead876e091e67824e",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/view/createChild.fragment.xml",
+          "line": 49
+        },
+        {
+          "file": "webapp/view/createChild.fragment.xml",
+          "line": 57
+        },
+        {
+          "file": "webapp/view/createChild.fragment.xml",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/manifest.json",
+      "line": 27,
+      "category": "deprecated-api",
+      "title": "mainService uses OData v2 — v4 preferred",
+      "issue": "dataSources.mainService.uri targets /sap/opu/odata/sap/API_PURCHASECONTRACT_PROCESS_SRV;v=0002/ with odataVersion '2.0'. The project already consumes OData v4 for purchaseorder and CatalogService — mixing v2 and v4 is intentional only where no v4 counterpart exists. YY1_CORP_PLANT_F4_CDS has the same v2 shape.",
+      "severityRationale": "Per rules, OData v2 where v4 exists is Low. No functional defect, but V4 ODataModel offers autoExpandSelect, server-side paging and improved CSRF handling.",
+      "recommendation": "Check SAP API Business Hub for a v4 variant of API_PURCHASECONTRACT_PROCESS_SRV and migrate the dataSource plus the controller's model usage (replace oModel.read with v4 ListBinding / requestObject).",
+      "codeSnippet": "\"uri\": \"/sap/opu/odata/sap/API_PURCHASECONTRACT_PROCESS_SRV;v=0002/\",\n\"type\": \"OData\",\n\"settings\": { \"odataVersion\": \"2.0\" }",
+      "referenceLink": "https://api.sap.com/",
+      "verdict": "PLAUSIBLE",
+      "additionalFiles": [
+        {
+          "file": "webapp/manifest.json",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 104,
+      "category": "hardcoding",
+      "title": "Hardcoded fallback URL '/odata/v4/CatalogService' in controller",
+      "issue": "If the CatalogService model is missing from the manifest at runtime, the controller falls back to the literal '/odata/v4/CatalogService'. The whole point of manifest routing is to avoid hardcoded URLs — the fallback silently masks a missing dataSource.",
+      "severityRationale": "The code works today but hides a configuration error. Not user-impacting.",
+      "recommendation": "Remove the fallback. If getModel('CatalogService') returns undefined, log an error and surface it instead of guessing a URL.",
+      "codeSnippet": "} else {\n  // Fallback to hardcoded URL if model not available\n  this._sCatalogServiceUrl = \"/odata/v4/CatalogService\";\n}",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/be0cf40f61184b358b5faedaec98b2da",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 14,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 300,
+      "category": "best-practice",
+      "title": "window.onbeforeunload directly assigned — clobbers any existing handler",
+      "issue": "window.onbeforeunload = function () {...} overwrites any handler another UI5 component or FLP plugin may have registered. Preferred pattern is addEventListener('beforeunload', fn) so the handler can later be removed in onExit.",
+      "severityRationale": "In an isolated test the handler runs fine; inside FLP it can suppress other plugins' unload warnings.",
+      "recommendation": "Use window.addEventListener('beforeunload', this._fnBeforeUnload = fn.bind(this)) and the matching removeEventListener in onExit.",
+      "codeSnippet": "window.onbeforeunload = function () {\n  this.getView().getModel(\"view\").setProperty(\"/editMode\", false);\n  this._releaseLock(this._sCurrentParentContract);\n  ...\n}.bind(this);",
+      "referenceLink": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 15,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 48,
+      "category": "best-practice",
+      "title": "console.log / console.warn used instead of sap/base/Log",
+      "issue": "The controller already imports sap/base/Log but mixes console.log (lines 48, 51, 230, 233), console.warn (line 844) and console.error (line 1087) directly. In productive builds console calls are not filtered by the UI5 log level and appear in the user's devtools.",
+      "severityRationale": "Hygiene — no user-visible defect, but Log.* respects runtime log level and the FLP log viewer.",
+      "recommendation": "Replace all console.* calls with Log.debug / Log.info / Log.warning / Log.error (already imported as Log).",
+      "codeSnippet": "console.log(\"calc model initialized\");\n...\nconsole.warn(\"Residual value is not available or not a number:\", this.residual);",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/module%3Asap%2Fbase%2FLog",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 230
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 844
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1087
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 44,
+      "category": "deprecated-api",
+      "title": "Global sap.ui.model.* references instead of module imports",
+      "issue": "new sap.ui.model.json.JSONModel(...), new sap.ui.model.Filter(...), sap.ui.model.FilterOperator, sap.ui.model.FilterType.Application, sap.ui.core.Fragment.byId and sap.m.MessageBox.error are reached through global namespace walks even though JSONModel, Filter, FilterOperator, Fragment and MessageBox are declared in the sap.ui.define header. UI5 global access is slated to be removed with the Evolution step and currently emits deprecation warnings when sap-ui-xx-nosync is set.",
+      "severityRationale": "Works today, deprecated by SAP, and the imports already exist — a 10-line cleanup.",
+      "recommendation": "Use the imported names consistently: new JSONModel(), new Filter(), FilterOperator.X, FilterType.Application (import 'sap/ui/model/FilterType'), Fragment.byId, MessageBox.*.",
+      "codeSnippet": "var oCalcModel = new sap.ui.model.json.JSONModel({ childCalc: {} });\n...\nvar oParentContractInput = sap.ui.core.Fragment.byId(\"createChildDialog\", \"parentContractInput\");",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/28fcd55b04654977b63dacbee0552712",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 51
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 255
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 412
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 431
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 848
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1088
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/contractList.controller.js",
+      "line": 41,
+      "category": "deprecated-api",
+      "title": "sap.ui.core.format.NumberFormat reached via global namespace",
+      "issue": "formatItalianNumber uses sap.ui.core.format.NumberFormat.getFloatInstance(...) at the global namespace instead of importing 'sap/ui/core/format/NumberFormat' through sap.ui.define. Same pattern recurs in childcontractList.controller.js (lines 217, 1332, 1498, 1521).",
+      "severityRationale": "Deprecated access path, works today.",
+      "recommendation": "Add NumberFormat to the define header and call NumberFormat.getFloatInstance directly.",
+      "codeSnippet": "return sap.ui.core.format.NumberFormat.getFloatInstance({ ... });",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/api/sap.ui.core.format.NumberFormat",
+      "verdict": "CONFIRMED",
+      "additionalFiles": [
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 217
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1332
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1498
+        },
+        {
+          "file": "webapp/controller/childcontractList.controller.js",
+          "line": 1521
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 356,
+      "category": "best-practice",
+      "title": "Direct window.history.go(-1) manipulation in navigation handler",
+      "issue": "onNavBackToContractList falls back to window.history.go(-1) when a previous hash exists. Direct browser-history manipulation bypasses the UI5 router and can leave router state out of sync with the shell when running inside FLP.",
+      "severityRationale": "Only visible as subtle breadcrumbs / back-stack issues inside FLP.",
+      "recommendation": "Always navTo the target route with the correct arguments. If 'back' semantics are needed, use oRouter.navTo('RoutecontractList', {}, {}, true) which replaces the hash without touching browser history.",
+      "codeSnippet": "if (sPreviousHash !== undefined) {\n  window.history.go(-1);\n} else {\n  oRouter.navTo(\"RoutecontractList\", {}, true);\n}",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/8e9f0e0b7f794858ab57b7aa41a90b0a",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 19,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/controller/childcontractList.controller.js",
+      "line": 974,
+      "category": "best-practice",
+      "title": "JSON.parse(JSON.stringify(...)) deep-copy of an OData entity for POST payload",
+      "issue": "The create flow clones the parent contract with JSON.parse(JSON.stringify(oParent)) and then mutates it. Any Date objects become ISO strings, binary fields become plain strings, and the clone silently drops symbol/function properties that the v2 proxy may rely on (eg. __metadata is explicitly deleted afterwards, but __deferred and __metadata on nested associations survive one level).",
+      "severityRationale": "Fragile cloning; works today because OData v2 responses are plain JSON.",
+      "recommendation": "Build a minimal payload object with only the properties the server needs instead of cloning the response, or use structuredClone() where available for a true deep copy that preserves Date instances.",
+      "codeSnippet": "const oPayload = JSON.parse(JSON.stringify(oParent));\ndelete oPayload.__metadata;\ndelete oPayload.PurchaseContract;",
+      "referenceLink": "https://developer.mozilla.org/en-US/docs/Web/API/structuredClone",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": 20,
+      "severity": "Low",
+      "layer": "webapp",
+      "technology": "SAPUI5",
+      "file": "webapp/manifest.json",
+      "line": 107,
+      "category": "best-practice",
+      "title": "flexEnabled: false — SAPUI5 Flexibility turned off",
+      "issue": "sap.ui5.flexEnabled is set to false, which disables SAPUI5 Flexibility (UI adaptation at runtime, key-user adaptation, personalization persistence). For a Fiori launchpad app on S/4HANA Cloud flexEnabled should normally be true to support key-user tailoring.",
+      "severityRationale": "No crash; blocks a standard S/4 extensibility capability.",
+      "recommendation": "Set flexEnabled: true unless there is an explicit reason to disable adaptation; add Flex design-time metadata (changes/, variants/) when flex is enabled.",
+      "codeSnippet": "\"sap.ui5\": {\n  \"flexEnabled\": false,",
+      "referenceLink": "https://sapui5.hana.ondemand.com/sdk/#/topic/f1430c0337534d469da3a56307ff76af",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "summary": {
+    "high": 1,
+    "medium": 10,
+    "low": 9,
+    "assessment": "Blockers present — approuter CSRF protection disabled on write-capable routes; several deprecated UI5 patterns and lifecycle leaks need remediation before go-live."
+  },
+  "_sourceHash": "2cafe3962c74d6e31e2bb4e049441b7ab2ae8d94dddd68c7cbc6f15df9d8c606",
+  "_reviewedAt": "2026-10-13T16:35:00Z",
+  "suggestedApproach": "inapp_btp",
+  "approachAnalysis": {
+    "approaches": [
+      {
+        "id": "customisation",
+        "name": "Customisation (Standard Configuration)",
+        "feasibility_score": 2,
+        "effort": "Low",
+        "risk": "Low",
+        "can_fully_meet": false,
+        "benefits": [
+          "Zero code, fully standard",
+          "No lifecycle overhead",
+          "Immediate availability"
+        ],
+        "limitations": [
+          "No standard parent/child contract hierarchy exists",
+          "Cannot auto-create child contracts with reference",
+          "No standard residual/ordered value calculation UI"
+        ],
+        "tools": [
+          "SAP S/4HANA Public Cloud Manage Purchase Contracts app",
+          "Configuration via SSCUI"
+        ],
+        "summary": "Standard S/4HANA Public Cloud has no delivered concept of parent/child purchase contracts with automated split, residual-value calculation and inheritance on parent change. Pure configuration cannot meet this requirement."
+      },
+      {
+        "id": "keyuser",
+        "name": "Key User Extensibility",
+        "feasibility_score": 3,
+        "effort": "Medium",
+        "risk": "Low",
+        "can_fully_meet": false,
+        "benefits": [
+          "Custom fields (Parent Contract, Child Contract ID) addable via Custom Fields app",
+          "No ABAP skills required",
+          "Low TCO and clean-core compliant"
+        ],
+        "limitations": [
+          "Cannot orchestrate multi-API GET/PATCH flows (contract copy, residual calc)",
+          "Cannot subscribe to business events for parent-change inheritance",
+          "Custom Analytical Query cannot deliver the editable transactional UI"
+        ],
+        "tools": [
+          "Custom Fields (extend A_PurchaseContract)",
+          "Custom Business Objects",
+          "Custom Analytical Queries"
+        ],
+        "summary": "Key User tools can only add the two custom header fields but cannot build the transactional split UI, call APIs in sequence, or react to business events. Insufficient on its own."
+      },
+      {
+        "id": "developer",
+        "name": "Developer Extensibility (ABAP Cloud / RAP)",
+        "feasibility_score": 6,
+        "effort": "High",
+        "risk": "Medium",
+        "can_fully_meet": false,
+        "benefits": [
+          "Runs inside S/4HANA, no BTP runtime cost",
+          "Direct access to released CDS and APIs via ABAP Cloud",
+          "Fiori Elements list→detail→edit fits annotation model"
+        ],
+        "limitations": [
+          "Cannot consume external S/4 business events natively — event subscription for parent-change inheritance requires BTP (Event Mesh / Integration Suite)",
+          "Outbound HTTP to API_PURCHASECONTRACT_PROCESS_SRV from same tenant is unusual; typically done via RAP on local released APIs",
+          "Custom field extensibility (Parent/Child) still required via Key User"
+        ],
+        "tools": [
+          "ABAP Cloud / RAP in Embedded Steampunk",
+          "Released CDS views (I_Plant, I_PurchaseContract)",
+          "SAP Fiori Elements (List Report / Object Page)"
+        ],
+        "summary": "RAP + Fiori Elements can deliver the two-screen list/edit/create UI and validations in-app at no runtime cost. However, the event-driven inheritance (PurchaseContract/Changed/v1) and FD's explicit 'BTP application' intent push a BTP layer in."
+      },
+      {
+        "id": "sidebyside",
+        "name": "Side-by-Side Extensibility (SAP BTP)",
+        "feasibility_score": 7,
+        "effort": "High",
+        "risk": "High",
+        "can_fully_meet": true,
+        "benefits": [
+          "Full flexibility for dynamic UI (editable table, Check/Save/Create flows)",
+          "Native event subscription via Event Mesh for parent-change inheritance",
+          "Clean decoupling from S/4HANA core"
+        ],
+        "limitations": [
+          "BTP runtime, Work Zone and Integration Suite incur commercial cost",
+          "Still depends on Key User custom fields in S/4 for Parent/Child IDs",
+          "Additional DevOps / lifecycle overhead vs in-app"
+        ],
+        "tools": [
+          "SAP Build Code / CAP",
+          "SAPUI5 on SAP Build Work Zone",
+          "SAP Integration Suite advanced event mesh"
+        ],
+        "summary": "A CAP service on BTP with a SAPUI5 freestyle UI consumes SAP_COM_0101 and SAP_COM_0053 via Destination service and subscribes to PurchaseContract/Changed/v1 through Event Mesh. Matches the FD's stated 'BTP application' direction fully."
+      },
+      {
+        "id": "inapp_btp",
+        "name": "In-App + BTP Mixed",
+        "feasibility_score": 9,
+        "effort": "High",
+        "risk": "Medium",
+        "can_fully_meet": true,
+        "benefits": [
+          "Custom fields and simple validations stay clean-core via Key User",
+          "Event inheritance handled on BTP where it belongs",
+          "UI flexibility for editable split table and dialogs"
+        ],
+        "limitations": [
+          "Two platforms to govern (S/4 Key User + BTP)",
+          "BTP runtime and Integration Suite subscription costs",
+          "Identity/destination plumbing (IAS, Destination, XSUAA) required"
+        ],
+        "tools": [
+          "Key User Custom Fields (Parent Contract, Child Contract ID)",
+          "SAP Cloud Application Programming Model (CAP) + SAPUI5 on SAP Build Work Zone",
+          "SAP Integration Suite advanced event mesh, Destination service, XSUAA"
+        ],
+        "summary": "Key User extensibility adds the two custom header fields on A_PurchaseContract; a CAP/UI5 app on BTP delivers the two-screen split UI, calls SAP_COM_0101/0053, and subscribes to PurchaseContract/Changed/v1 via Event Mesh to cascade parent edits to children.",
+        "layer_split": {
+          "layer1_label": "S/4HANA In-App (Key User)",
+          "layer1_handles": [
+            "Custom field Parent Contract on A_PurchaseContract",
+            "Custom field Child Contract ID on A_PurchaseContract",
+            "Expose fields on SAP_COM_0101 OData"
+          ],
+          "layer2_label": "SAP BTP (CAP + UI5 + Event Mesh)",
+          "layer2_handles": [
+            "Freestyle SAPUI5 split UI (list, edit, create child)",
+            "Orchestration of GET/PATCH on API_PURCHASECONTRACT_PROCESS_SRV and API_PURCHASEORDER_2",
+            "Event subscription PurchaseContract/Changed/v1 and cascade to child contracts"
+          ],
+          "why_both_needed": "Custom fields can only be added inside S/4 (Key User); the FD explicitly mandates a BTP application and requires event-driven inheritance plus a dynamic editable UI that is beyond standard Fiori Elements annotations."
+        }
+      },
+      {
+        "id": "keyuser_inapp",
+        "name": "Key User + In-App Mixed",
+        "feasibility_score": 6,
+        "effort": "Medium",
+        "risk": "Medium",
+        "can_fully_meet": false,
+        "benefits": [
+          "Custom fields via Key User remain clean-core",
+          "RAP delivers transactional UI inside S/4 at no runtime cost",
+          "Lower TCO than BTP route"
+        ],
+        "limitations": [
+          "No native way for RAP to subscribe to S/4 business events for parent-change cascade",
+          "FD explicitly requests a BTP application — contradicts in-app-only",
+          "Freestyle dynamic edits beyond FE annotations are costly in RAP"
+        ],
+        "tools": [
+          "Key User Custom Fields",
+          "ABAP Cloud / RAP + Fiori Elements",
+          "Released CDS (I_Plant)"
+        ],
+        "summary": "Covers UI and custom fields in-app but cannot satisfy the event-driven parent-to-child inheritance requirement, which needs an event broker (Event Mesh) on BTP.",
+        "layer_split": {
+          "layer1_label": "Key User Layer",
+          "layer1_handles": [
+            "Custom fields Parent Contract, Child Contract ID",
+            "Field exposure on released OData"
+          ],
+          "layer2_label": "In-App RAP Layer (ABAP Cloud)",
+          "layer2_handles": [
+            "RAP BO wrapping purchase contract orchestration",
+            "Fiori Elements List Report + Object Page",
+            "Check/Save/Create actions and validations"
+          ],
+          "why_both_needed": "Key User delivers the field extensions clean-core; RAP delivers the editable split UI and action logic — but event inheritance remains unaddressed."
+        }
+      }
+    ],
+    "recommended": "inapp_btp",
+    "recommendation_reason": "The FD explicitly mandates a BTP application and requires subscription to the S/4 business event PurchaseContract/Changed/v1 to cascade parent updates to children — event brokering is only possible on BTP (Event Mesh / Integration Suite). The two custom header fields (Parent Contract, Child Contract ID) must still be added inside S/4 via Key User Custom Fields on A_PurchaseContract so they are exposed on SAP_COM_0101. The BTP layer (CAP + SAPUI5 on Work Zone) delivers the dynamic editable split UI, orchestrates GET/PATCH on API_PURCHASECONTRACT_PROCESS_SRV and API_PURCHASEORDER_2, and handles the event subscription. A pure Developer approach cannot meet the event-driven inheritance requirement.",
+    "ai_evaluation": {
+      "standard_capability": "No — standard Manage Purchase Contracts has no parent/child split, residual-value calculation, or event-driven inheritance across contract hierarchies.",
+      "standard_ai": "None applicable — Joule and SAP Document AI do not cover purchase-contract split/inheritance orchestration (confirm on SAP Discovery Center).",
+      "recommendation": "Custom build required",
+      "reason": "The requirement is deterministic transactional orchestration, not AI inference; no delivered standard app or SAP AI service covers parent/child contract splitting with event-based inheritance."
+    },
+    "ui_tradeoff": {
+      "ui_nature": "dynamic/interactive",
+      "rap_effort": "High — editable table with cross-row sum checks, Display/Edit toggle, custom Check/Save/Create dialogs stretch Fiori Elements annotations and would require significant RAP action and draft handling; no incremental runtime cost though.",
+      "btp_cost": "BTP adds a freestyle SAPUI5 UI with full control over editable grid behaviour and validation UX, plus required Event Mesh subscription; incurs Cloud Foundry/Kyma runtime, Work Zone hosting, Integration Suite advanced event mesh and Destination/XSUAA costs.",
+      "verdict": "Developer + BTP (accept BTP cost for feasibility/UX)"
+    }
+  }
+}
